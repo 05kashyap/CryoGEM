@@ -28,4 +28,5 @@ python -m cryogem ddpm_pipeline --dataset "Ribosome(10028)" \
   --epochs 10 \
   --timesteps 250 \
   --batch_size 1 \
-  --output_dir save_images/ddpm_experiment
+  --output_dir save_images/ddpm_experiment \
+  --gpu_ids 0
