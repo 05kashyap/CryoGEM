@@ -84,6 +84,8 @@ def add_args(parser):
     parser.add_argument("--fid_batch_size", type=int, default=64, 
                       help="batch size for FID calculation")
     parser.add_argument("--isTrain", action="store_true", help="if specified, train the model")
+    parser.add_argument("--checkpoints_dir", type=str, default="checkpoints",
+                      help="directory to save checkpoints")
 
     return parser
 
