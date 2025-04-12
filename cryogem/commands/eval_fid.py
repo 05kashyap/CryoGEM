@@ -86,6 +86,8 @@ def add_args(parser):
     parser.add_argument("--isTrain", action="store_true", help="if specified, train the model")
     parser.add_argument("--checkpoints_dir", type=str, default="checkpoints",
                       help="directory to save checkpoints")
+    parser.add_argument("--name", type=str, default="ddpm_model",
+                      help="name of the model")
 
     return parser
 
