@@ -88,6 +88,8 @@ def add_args(parser):
                       help="directory to save checkpoints")
     parser.add_argument("--name", type=str, default="ddpm_model",
                       help="name of the model")
+    parser.add_argument("--preprocess", type=str, default="resize_and_crop",
+                      help="preprocessing method")
 
     return parser
 
