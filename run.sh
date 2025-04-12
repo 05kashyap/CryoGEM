@@ -1,6 +1,12 @@
 #!/bin/bash
 
-# This script is used to run the Python script with the specified arguments.
+# This script is used to run the Python script with the specified arguments.after repo has been cloned
+
+curl -L -o testing/data.zip https://www.kaggle.com/api/v1/datasets/download/aryankashyapnaveen/cryogem-test
+
+unzip testing/data.zip -d testing/ # Unzip the downloaded file to the testing directory
+
+rm -rf testing/data.zip
 
 python -m cryogem gen_data --mode homo --device cuda:0 \
   --input_map testing/data/exp_abinitio_volumes/densitymap.10028.90.mrc \

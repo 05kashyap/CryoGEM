@@ -20,6 +20,8 @@ Accepted by NeurIPS 2024🎉🎉🎉 | [Project Page](https://jiakai-zhang.githu
 
 ### Installation
 
+
+
 1. Clone repo
 
    ```bash
@@ -43,6 +45,12 @@ conda activate cryogem
 
 As the dataset is too large to upload, please download [data.zip](https://www.dropbox.com/scl/fi/0zczm5hlb1h8qes1kobhz/data.zip?rlkey=46ob2ywa80t1mcvezy4lj6tu2&st=626po0mp&dl=0) on Dropbox, and unzip it to `testing/` .
 
+Extras: Install data from: 
+```console 
+curl -L -o testing/data.zip https://www.kaggle.com/api/v1/datasets/download/aryankashyapnaveen/cryogem-test
+
+unzip testing/data.zip
+```
 ---
 
 # Toturial
