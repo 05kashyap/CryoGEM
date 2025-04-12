@@ -20,11 +20,13 @@ python -m cryogem gen_data --mode homo --device cuda:0 \
 
 python -m cryogem esti_ice --apix 5.36 --input_dir save_images/ddpm_data/train/mics_mrc --save_dir save_images/esti_ice/Ribosome\(10028\)/ --output_len 1024         
 
+# Diffusion timesteps reduced from 1000
 python -m cryogem ddpm_pipeline --dataset "Ribosome(10028)" \
   --gpu 0 \
   --training_samples 100 \
   --testing_samples 50 \
   --epochs 10 \
-  --timesteps 1000 \
+  --timesteps 250 \
   --batch_size 1 \
-  --output_dir save_images/ddpm_experiment
+  --output_dir save_images/ddpm_experiment \
+  --crop_size 128
