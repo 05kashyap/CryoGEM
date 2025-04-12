@@ -83,6 +83,8 @@ def add_args(parser):
                       help="device to use")
     parser.add_argument("--fid_batch_size", type=int, default=64, 
                       help="batch size for FID calculation")
+    parser.add_argument("--isTrain", action="store_true", help="if specified, train the model")
+
     return parser
 
 def main(args):
