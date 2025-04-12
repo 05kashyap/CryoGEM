@@ -72,7 +72,7 @@ class Visualizer():
         """
         self.opt = opt  # cache the option
         self.display_id = opt.display_id
-        self.use_html = opt.phase == 'train' and not opt.no_html
+        self.use_html = opt.phase == 'train' # and not opt.no_html
         self.win_size = opt.display_winsize
         self.name = opt.name
         self.port = opt.display_port

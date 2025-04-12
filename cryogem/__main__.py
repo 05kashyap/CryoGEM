@@ -1,52 +1,53 @@
 """CryoGEM: Physics-Informed Generative Cryo-Electron Microscopy"""
 
+import sys
+import argparse
+import importlib.metadata
+import logging
+import os
+
+from cryogem.commands import gen_data, esti_ice, train, test, analysis_fspace, train_ddpm, eval_fid, video, gallery, ddpm_pipeline
+logger = logging.getLogger(__name__)
 
 def main():
-    import argparse
-    import os
-
-    parser = argparse.ArgumentParser(description=__doc__)
-    import cryogem
-
-    parser.add_argument(
-        "--version", action="version", version="CryoGEM " + cryogem.__version__
+    # configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(name)s - %(levelname)s - %(message)s'
     )
-
-    import cryogem.commands.train
-    import cryogem.commands.test
-    import cryogem.commands.gen_data
-    import cryogem.commands.esti_ice
-    import cryogem.commands.video
-    import cryogem.commands.gallery
-    import cryogem.commands.analysis_fspace
     
-
-    modules = [
-        cryogem.commands.train,
-        cryogem.commands.test,
-        cryogem.commands.gen_data,
-        cryogem.commands.esti_ice,
-        cryogem.commands.video,
-        cryogem.commands.gallery,
-        cryogem.commands.analysis_fspace,
-    ]
-
-    subparsers = parser.add_subparsers(title="Choose a command")
+    # define commands
+    command_list = {
+        'gen_data': gen_data,
+        'esti_ice': esti_ice,
+        'train': train,
+        'test': test, 
+        'analysis_fspace': analysis_fspace,
+        'video': video,
+        'gallery': gallery,
+        'train_ddpm': train_ddpm,  # Add new DDPM training command
+        'eval_fid': eval_fid,      # Add new FID evaluation command
+        'ddpm_pipeline': ddpm_pipeline,  # Add new DDPM pipeline command
+    }
+    
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+    )
+    parser.add_argument('--version', '-V', action='version',
+                      version=importlib.metadata.version("cryogem"))
+    subparsers = parser.add_subparsers(dest='command', help='cryogem command')
     subparsers.required = True
-
-    def get_str_name(module):
-        return os.path.splitext(os.path.basename(module.__file__))[0]
-
-    for module in modules:
-        this_parser = subparsers.add_parser(
-            get_str_name(module), description=module.__doc__
-        )
-        module.add_args(this_parser)
-        this_parser.set_defaults(func=module.main)
-
+    
+    # register commands
+    for name, module in command_list.items():
+        subparser = subparsers.add_parser(name, help=getattr(module, '__doc__', None))
+        module.add_args(subparser)
+    
+    # parse the command line
     args = parser.parse_args()
-    args.func(args)
-
+    
+    # Call appropriate module's main() with args
+    command_list[args.command].main(args)
 
 if __name__ == "__main__":
     main()

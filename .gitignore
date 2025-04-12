@@ -166,3 +166,7 @@ testing/checkpoints/
 testing/data/*
 save_images/
 .history/
+
+data
+_version.py
+cryogem/_version.py
