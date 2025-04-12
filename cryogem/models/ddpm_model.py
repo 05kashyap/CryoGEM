@@ -340,9 +340,11 @@ class DDPMModel(BaseModel):
         # Create UNet for noise prediction and DDPM for diffusion process
         self.unet = UNet(
             input_channels=1, 
-            model_channels=128,
+            model_channels=64,  # Reduced from 128
             out_channels=1,
-            dropout=0.1
+            num_res_blocks=1,   # Reduced from 2
+            dropout=0.1,
+            channel_mult=(1, 2, 4)  # Reduced from (1, 2, 4, 8)
         )
         
         self.netDiffusion = DDPM(
