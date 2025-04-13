@@ -154,7 +154,7 @@ def main(args):
     # run_command(cmd_eval_fid, "Generate and evaluate samples")
     
     logger.info("Pipeline completed! Results are available in: " + args.output_dir)
-    logger.info("FID results are available in: " + os.path.join(generated_samples_dir, "fid_results.txt"))
+    # logger.info("FID results are available in: " + os.path.join(generated_samples_dir, "fid_results.txt"))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Full DDPM training and evaluation pipeline")
