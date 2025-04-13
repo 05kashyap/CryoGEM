@@ -58,6 +58,10 @@ def compute_statistics_of_path(path, model, batch_size, device):
             
         # Move to CPU and convert to numpy
         pred = pred.cpu().numpy()
+        
+        # Reshape to [batch_size, 2048]
+        pred = pred.reshape(pred.shape[0], -1)
+        
         pred_arr.append(pred)
         
     pred_arr = np.concatenate(pred_arr, axis=0)
@@ -90,6 +94,8 @@ def add_args(parser):
                       help="name of the model")
     parser.add_argument("--preprocess", type=str, default="resize_and_crop",
                       help="preprocessing method")
+    parser.add_argument("--timesteps", type=int, default=250,
+                      help="number of timesteps for DDPM")
 
     return parser
 

@@ -137,21 +137,21 @@ def main(args):
     run_command(cmd_train_ddpm, "Train DDPM model")
     
     # 5. Generate samples with trained DDPM model
-    logger.info("Step 5: Generating samples with trained DDPM model...")
-    generated_samples_dir = os.path.join(args.output_dir, "generated_samples")
-    os.makedirs(generated_samples_dir, exist_ok=True)
+    # logger.info("Step 5: Generating samples with trained DDPM model...")
+    # generated_samples_dir = os.path.join(args.output_dir, "generated_samples")
+    # os.makedirs(generated_samples_dir, exist_ok=True)
     
-    cmd_eval_fid = [
-        "python", "-m", "cryogem", "eval_fid",
-        "--model_path", os.path.join(ddpm_checkpoints_dir, "ddpm_model/latest_net_Diffusion.pth"),
-        "--real_images_dir", os.path.join(testing_data_dir, "mics_png"),
-        "--generated_images_dir", generated_samples_dir,
-        "--num_samples", str(args.testing_samples),
-        "--batch_size", "16",
-        "--image_size", "256",
-        "--device", f"cuda:{args.gpu}"
-    ]
-    run_command(cmd_eval_fid, "Generate and evaluate samples")
+    # cmd_eval_fid = [
+    #     "python", "-m", "cryogem", "eval_fid",
+    #     "--model_path", "save_images/ddpm_experiment/ddpm_checkpoints/0_net_Diffusion.pth",#os.path.join(ddpm_checkpoints_dir, "ddpm_model/latest_net_Diffusion.pth"),
+    #     "--real_images_dir", os.path.join(testing_data_dir, "mics_png"),
+    #     "--generated_images_dir", generated_samples_dir,
+    #     "--num_samples", str(args.testing_samples),
+    #     "--batch_size", "16",
+    #     "--image_size", "256",
+    #     "--device", f"cuda:{args.gpu}"
+    # ]
+    # run_command(cmd_eval_fid, "Generate and evaluate samples")
     
     logger.info("Pipeline completed! Results are available in: " + args.output_dir)
     logger.info("FID results are available in: " + os.path.join(generated_samples_dir, "fid_results.txt"))
