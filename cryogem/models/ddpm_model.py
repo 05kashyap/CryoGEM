@@ -340,13 +340,13 @@ class DDPMModel(BaseModel):
         # Create UNet for noise prediction and DDPM for diffusion process
         self.unet = UNet(
             input_channels=1, 
-            model_channels=32,  # Reduced from 64
+            model_channels=64,  # Increased back to standard size
             out_channels=1,
-            num_res_blocks=1,
+            num_res_blocks=2,   # Increased to 2 residual blocks per level
             dropout=0.1,
-            channel_mult=(1, 2, 3),  # Reduced from (1, 2, 4)
-            attention_resolutions=[],  # Remove attention blocks completely
-            num_heads=1  # Reduce number of attention heads if you keep attention
+            channel_mult=(1, 2, 4, 8),  # Full channel multiplier sequence
+            attention_resolutions=[8, 16],  # Re-add attention at medium resolutions
+            num_heads=4  # Increase attention heads
         )
         
         self.netDiffusion = DDPM(
