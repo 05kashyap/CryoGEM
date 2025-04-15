@@ -148,7 +148,7 @@ def main(args):
     
     cmd_eval_fid = [
         "python", "-m", "cryogem", "eval_fid",
-        "--model_path", latest_checkpoint,
+        "--model_path", "save_images/ddpm_experiment/ddpm_checkpoints/ddpm_model/latest_net_Diffusion.pth" ,
         "--real_images_dir", os.path.join(testing_data_dir, "mics_png"),
         "--generated_images_dir", generated_samples_dir,
         "--num_samples", str(args.testing_samples),

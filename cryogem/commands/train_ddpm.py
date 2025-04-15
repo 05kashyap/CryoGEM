@@ -93,7 +93,8 @@ def main(args):
         epoch_iter = 0
         visualizer.reset()
         
-        for i, data in enumerate(dataset):
+        for i, data in enumerate(tqdm(dataset, desc=f"Epoch {epoch}/{opt.n_epochs}, iters: {epoch_iter}/{dataset_size}")):
+
             iter_start_time = time.time()
             
             if total_iters % opt.print_freq == 0:
@@ -147,6 +148,9 @@ def main(args):
         logger.info(f"End of epoch {epoch} / {opt.n_epochs + opt.n_epochs_decay} \t "+
                    f"Time Taken: {time.time() - epoch_start_time} sec")
 
+    model.save_networks('latest')  # Add this line to save latest at the very end
+    model.save_networks(epoch)     # Add this line to save final epoch
+    logger.info("Training completed.")
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     main(add_args(parser).parse_args())
