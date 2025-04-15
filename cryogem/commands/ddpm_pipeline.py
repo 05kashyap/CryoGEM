@@ -110,51 +110,57 @@ def main(args):
     ]
     run_command(cmd_gen_testing, "Generate testing data")
     
-    # 4. Train DDPM model on generated data
+        # 4. Train DDPM model on generated data
     logger.info("Step 4: Training DDPM model on generated data...")
     ddpm_checkpoints_dir = os.path.join(args.output_dir, "ddpm_checkpoints")
     os.makedirs(ddpm_checkpoints_dir, exist_ok=True)
     
+    model_name = "ddpm_model"
     cmd_train_ddpm = [
         "python", "-m", "cryogem", "train_ddpm",
-        "--name", "ddpm_model",
-        "--phase", "train",  # Explicitly set the phase
+        "--name", model_name,
+        "--phase", "train",
         "--gpu_ids", args.gpu,
         "--sync_dir", os.path.join(training_data_dir, "mics_mrc"),
         "--mask_dir", os.path.join(training_data_dir, "particles_mask"),
-        "--pose_dir", os.path.join(training_data_dir, "mics_particle_info"),  # Add this line   
+        "--pose_dir", os.path.join(training_data_dir, "mics_particle_info"),
         "--real_dir", os.path.join(testing_data_dir, "mics_mrc"),
         "--weight_map_dir", f"save_images/esti_ice/{args.dataset}/",
-        "--max_dataset_size", str(int(args.training_samples)),  # Ensure integer
+        "--max_dataset_size", str(int(args.training_samples)),
         "--timesteps", str(args.timesteps),
-        "--beta_schedule", "linear",
+        "--beta_schedule", "linear", 
         "--n_epochs", str(args.epochs),
         "--batch_size", str(args.batch_size),
-        "--checkpoints_dir", ddpm_checkpoints_dir,
+        "--checkpoints_dir", ddpm_checkpoints_dir,  # This is the base checkpoint directory
         "--save_dir", os.path.join(args.output_dir, "training_results"),
         "--lr_policy", "linear",
+        "--save_epoch_freq", "10",  # Save checkpoints every 10 epochs
     ]
     run_command(cmd_train_ddpm, "Train DDPM model")
     
     # 5. Generate samples with trained DDPM model
-    # logger.info("Step 5: Generating samples with trained DDPM model...")
-    # generated_samples_dir = os.path.join(args.output_dir, "generated_samples")
-    # os.makedirs(generated_samples_dir, exist_ok=True)
+    logger.info("Step 5: Generating samples with trained DDPM model...")
+    generated_samples_dir = os.path.join(args.output_dir, "generated_samples") 
+    os.makedirs(generated_samples_dir, exist_ok=True)
     
-    # cmd_eval_fid = [
-    #     "python", "-m", "cryogem", "eval_fid",
-    #     "--model_path", "save_images/ddpm_experiment/ddpm_checkpoints/0_net_Diffusion.pth",#os.path.join(ddpm_checkpoints_dir, "ddpm_model/latest_net_Diffusion.pth"),
-    #     "--real_images_dir", os.path.join(testing_data_dir, "mics_png"),
-    #     "--generated_images_dir", generated_samples_dir,
-    #     "--num_samples", str(args.testing_samples),
-    #     "--batch_size", "16",
-    #     "--image_size", "256",
-    #     "--device", f"cuda:{args.gpu}"
-    # ]
-    # run_command(cmd_eval_fid, "Generate and evaluate samples")
+    # Use the latest checkpoint for evaluation
+    latest_checkpoint = os.path.join(ddpm_checkpoints_dir, model_name, "latest_net_Diffusion.pth")
+    
+    cmd_eval_fid = [
+        "python", "-m", "cryogem", "eval_fid",
+        "--model_path", latest_checkpoint,
+        "--real_images_dir", os.path.join(testing_data_dir, "mics_png"),
+        "--generated_images_dir", generated_samples_dir,
+        "--num_samples", str(args.testing_samples),
+        "--batch_size", "16",
+        "--image_size", "256",
+        "--device", f"cuda:{args.gpu}",
+        "--timesteps", str(args.timesteps),
+    ]
+    run_command(cmd_eval_fid, "Generate and evaluate samples")
     
     logger.info("Pipeline completed! Results are available in: " + args.output_dir)
-    # logger.info("FID results are available in: " + os.path.join(generated_samples_dir, "fid_results.txt"))
+    logger.info("FID results are available in: " + os.path.join(generated_samples_dir, "fid_results.txt"))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Full DDPM training and evaluation pipeline")
