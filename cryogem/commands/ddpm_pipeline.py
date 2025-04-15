@@ -77,7 +77,7 @@ def main(args):
         "--n_particles", str(max(1000, int(args.training_samples * 100 * 1.2))),  # Ensure enough particles
         "--batch_size", "8"  # Set a small batch size
     ]
-    run_command(cmd_gen_training, "Generate training data")
+    # run_command(cmd_gen_training, "Generate training data")
 
     logger.info("Step 2: Generating ice gradient weight maps...")
     ice_dir = f"save_images/esti_ice/{args.dataset}/"
@@ -91,7 +91,7 @@ def main(args):
         "--output_len", "1024",
         "--device", f"cuda:{args.gpu}"
     ]
-    run_command(cmd_esti_ice, "Generate ice gradient weight maps")
+    # run_command(cmd_esti_ice, "Generate ice gradient weight maps")
     
     # 3. Generate testing data with CryoGEM
     logger.info("Step 3: Generating testing data using CryoGEM...")
@@ -108,7 +108,7 @@ def main(args):
         "--particle_size", "90",
         "--mask_threshold", "0.9"
     ]
-    run_command(cmd_gen_testing, "Generate testing data")
+    # run_command(cmd_gen_testing, "Generate testing data")
     
         # 4. Train DDPM model on generated data
     logger.info("Step 4: Training DDPM model on generated data...")

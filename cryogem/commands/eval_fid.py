@@ -107,7 +107,7 @@ def main(args):
     
     # Load model
     model = DDPMModel(args)
-    model.load_networks("latest")
+    model.load_networks("latest",args.model_path, hardcode=True)
     model.eval()
     
     # Generate samples
