@@ -591,11 +591,11 @@ class DDPMModel(BaseModel):
             parser.add_argument('--batch_size', type=int, default=8, help='input batch size')
             parser.add_argument('--sample_interval', type=int, default=1000, help='how many iterations to sample')
             # Add new architecture parameters
-            parser.add_argument('--dim', type=int, default=1024, help='base dimension for enhanced unet')
-            parser.add_argument('--time_dim', type=int, default=256, help='timestep embedding dimension')
-            parser.add_argument('--depth', type=int, default=1, help='transformer depth')
-            parser.add_argument('--heads', type=int, default=4, help='transformer heads')
-            parser.add_argument('--dim_head', type=int, default=64, help='dimension per head')
+            parser.add_argument('--dim', type=int, default=2048, help='base dimension for enhanced unet')
+            parser.add_argument('--time_dim', type=int, default=512, help='timestep embedding dimension')
+            parser.add_argument('--depth', type=int, default=2, help='transformer depth')
+            parser.add_argument('--heads', type=int, default=8, help='transformer heads')
+            parser.add_argument('--dim_head', type=int, default=96, help='dimension per head')
             parser.add_argument('--mlp_ratio', type=int, default=4, help='mlp expansion ratio')
             parser.add_argument('--drop_rate', type=float, default=0.1, help='dropout rate')
             
@@ -609,13 +609,14 @@ class DDPMModel(BaseModel):
         self.timesteps = opt.timesteps if hasattr(opt, 'timesteps') else 1000
         
         # Get architecture parameters (with defaults if not provided)
-        dim = getattr(opt, 'dim', 1024)
-        time_dim = getattr(opt, 'time_dim', 256)
-        depth = getattr(opt, 'depth', 1)
-        heads = getattr(opt, 'heads', 4)
-        dim_head = getattr(opt, 'dim_head', 64)
-        mlp_ratio = getattr(opt, 'mlp_ratio', 4)
-        drop_rate = getattr(opt, 'drop_rate', 0.1)
+        dim = getattr(opt, 'dim', 2048)           # Increased from 1024
+        time_dim = getattr(opt, 'time_dim', 512)  # Increased from 256
+        depth = getattr(opt, 'depth', 2)          # Increased from 1
+        heads = getattr(opt, 'heads', 8)          # Increased from 4
+        dim_head = getattr(opt, 'dim_head', 96)   # Increased from 64
+        mlp_ratio = getattr(opt, 'mlp_ratio', 4)  # Keep same
+        drop_rate = getattr(opt, 'drop_rate', 0.1)  # Keep same
+        
         
         # Create EnhancedUNet for noise prediction and DDPM for diffusion process
         self.unet = EnhancedUNet(
