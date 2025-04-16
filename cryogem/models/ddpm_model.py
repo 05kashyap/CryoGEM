@@ -288,37 +288,69 @@ class EnhancedUNet(nn.Module):
         self.time_dim = time_dim
         emb_dim = time_dim
         self.input_channels = input_channels
-        # Calculate dimensions for the network scales
-        dims = (dim // 32, dim // 16, dim // 8, dim // 4, dim // 2, dim)
+        # Calculate dimensions for the network scales - make this significantly deeper
+        dims = (dim // 64, dim // 32, dim // 16, dim // 8, dim // 4, dim // 2, dim)
 
         self.initial = nn.Sequential(
             nn.Conv2d(input_channels, dims[0], kernel_size=3, padding=1, bias=False),
             nn.GroupNorm(1, dims[0]),
             nn.GELU(),
+            nn.Conv2d(dims[0], dims[0], kernel_size=3, padding=1, bias=False),
+            nn.GroupNorm(1, dims[0]),
+            nn.GELU(),
         )
 
+        # Create more down blocks for a deeper architecture
         self.down_blocks = nn.ModuleList()
         self.up_blocks = nn.ModuleList()
         self.transformer_blocks = nn.ModuleList()
         self.bottleneck_blocks = nn.ModuleList()
 
-        self.down_blocks.append(Down(dims[0], dims[2], emb_dim))
+        # Add 5 downsampling blocks instead of 4
+        self.down_blocks.append(Down(dims[0], dims[1], emb_dim))
+        self.down_blocks.append(Down(dims[1], dims[2], emb_dim))
         self.down_blocks.append(Down(dims[2], dims[3], emb_dim))
+        self.down_blocks.append(Down(dims[3], dims[4], emb_dim))
+        self.down_blocks.append(Down(dims[4], dims[5], emb_dim))  # Additional down block
 
+        # Add transformer blocks to each level
+        self.transformer_blocks.append(Transformer(dims[1], depth, heads, dim_head, mlp_ratio, drop_rate))
         self.transformer_blocks.append(Transformer(dims[2], depth, heads, dim_head, mlp_ratio, drop_rate))
         self.transformer_blocks.append(Transformer(dims[3], depth, heads, dim_head, mlp_ratio, drop_rate))
+        self.transformer_blocks.append(Transformer(dims[4], depth, heads, dim_head, mlp_ratio, drop_rate))
+        self.transformer_blocks.append(Transformer(dims[5], depth, heads, dim_head, mlp_ratio, drop_rate))  # New transformer
 
-        self.bottleneck_blocks.append(DoubleConv(dims[3], dims[4]))
-        self.bottleneck_blocks.append(DoubleConv(dims[4], dims[4]))
-        self.bottleneck_blocks.append(DoubleConv(dims[4], dims[3]))
+        # Multiple transformer blocks per level (stack them)
+        self.transformer_blocks_2 = nn.ModuleList()
+        self.transformer_blocks_2.append(Transformer(dims[1], depth, heads, dim_head, mlp_ratio, drop_rate))
+        self.transformer_blocks_2.append(Transformer(dims[2], depth, heads, dim_head, mlp_ratio, drop_rate))
+        self.transformer_blocks_2.append(Transformer(dims[3], depth, heads, dim_head, mlp_ratio, drop_rate))
+        self.transformer_blocks_2.append(Transformer(dims[4], depth, heads, dim_head, mlp_ratio, drop_rate))
+        self.transformer_blocks_2.append(Transformer(dims[5], depth, heads, dim_head, mlp_ratio, drop_rate))
 
-        self.up_blocks.append(Up(dims[3], dims[2], emb_dim))
+        # Expand bottleneck with more layers
+        self.bottleneck_blocks.append(DoubleConv(dims[5], dims[6]))
+        self.bottleneck_blocks.append(DoubleConv(dims[6], dims[6]))
+        self.bottleneck_blocks.append(DoubleConv(dims[6], dims[6]))
+        self.bottleneck_blocks.append(DoubleConv(dims[6], dims[6]))  # Extra bottleneck layer
+        self.bottleneck_blocks.append(DoubleConv(dims[6], dims[5]))
+
+        # Add more up blocks for symmetric architecture
+        self.up_blocks.append(Up(dims[5], dims[4], emb_dim))
+        self.up_blocks.append(Up(dims[5], dims[3], emb_dim))  # Note: dim[5] to account for additional features
+        self.up_blocks.append(Up(dims[4], dims[2], emb_dim))
         self.up_blocks.append(Up(dims[3], dims[1], emb_dim))
-        self.up_blocks.append(Up(dims[1], dims[0], emb_dim))
-        self.up_blocks.append(Up(dims[1], dims[0], emb_dim))
+        self.up_blocks.append(Up(dims[2], dims[0], emb_dim))
 
-        self.last = To_Image(dims[0], out_channels)
+        # Add an additional transformer for feature refinement
+        self.refinement_transformer = Transformer(dims[0], depth, heads, dim_head, mlp_ratio, drop_rate)
 
+        self.last = nn.Sequential(
+            DoubleConv(dims[0], dims[0] // 2),
+            DoubleConv(dims[0] // 2, dims[0] // 2),  # Extra refinement
+            To_Image(dims[0] // 2, out_channels)
+        )
+        
     def pos_encoding(self, t, channels):
         """Improved timestep embedding with sinusoidal positions"""
         inv_freq = 1.0 / (10000 ** (torch.arange(0, channels, 2).float().to(t.device) / channels))
@@ -328,31 +360,54 @@ class EnhancedUNet(nn.Module):
         return pos_enc
 
     def forward(self, x, t):
-        """Forward pass with timestep embedding"""
+        """Forward pass with timestep embedding and deeper architecture"""
         # Convert integer timesteps to embeddings
         t = t.unsqueeze(-1).type(torch.float)
         t = self.pos_encoding(t, self.time_dim)
 
-        x1 = self.initial(x)
-
-        x2 = self.down_blocks[0](x1, t)
-        x2 = self.transformer_blocks[0](x2)
-
-        x3 = self.down_blocks[1](x2, t)
-        x3 = self.transformer_blocks[1](x3)
-
-        x3 = self.bottleneck_blocks[0](x3)
-        x3 = self.bottleneck_blocks[1](x3)
-        x3 = self.bottleneck_blocks[2](x3)
-
-        x = self.up_blocks[0](x3, None, t)
-        x = self.up_blocks[1](x, x2, t)
-        x = self.up_blocks[2](x, None, t)
-        x = self.up_blocks[3](x, x1, t)
-
-        x = self.last(x)
-
-        return x
+        # Initial feature extraction
+        x0 = self.initial(x)
+        
+        # Downsampling path with transformer blocks
+        x1 = self.down_blocks[0](x0, t)
+        x1 = self.transformer_blocks[0](x1)
+        x1 = self.transformer_blocks_2[0](x1)  # Additional transformer
+        
+        x2 = self.down_blocks[1](x1, t)
+        x2 = self.transformer_blocks[1](x2)
+        x2 = self.transformer_blocks_2[1](x2)
+        
+        x3 = self.down_blocks[2](x2, t)
+        x3 = self.transformer_blocks[2](x3)
+        x3 = self.transformer_blocks_2[2](x3)
+        
+        x4 = self.down_blocks[3](x3, t)
+        x4 = self.transformer_blocks[3](x4)
+        x4 = self.transformer_blocks_2[3](x4)
+        
+        x5 = self.down_blocks[4](x4, t)  # Additional down block
+        x5 = self.transformer_blocks[4](x5)
+        x5 = self.transformer_blocks_2[4](x5)
+        
+        # Bottleneck processing
+        x5 = self.bottleneck_blocks[0](x5)
+        x5 = self.bottleneck_blocks[1](x5)
+        x5 = self.bottleneck_blocks[2](x5)
+        x5 = self.bottleneck_blocks[3](x5)  # Extra bottleneck processing
+        x5 = self.bottleneck_blocks[4](x5)
+        
+        # Upsampling path with skip connections
+        u = self.up_blocks[0](x5, x4, t)       # Up from bottleneck
+        u = self.up_blocks[1](u, x3, t)        # Include skip from x3
+        u = self.up_blocks[2](u, x2, t)        # Include skip from x2
+        u = self.up_blocks[3](u, x1, t)        # Include skip from x1
+        u = self.up_blocks[4](u, x0, t)        # Include skip from initial
+        
+        # Final refinement
+        u = self.refinement_transformer(u)      # Final transformer refinement
+        output = self.last(u)
+        
+        return output
 
 class UNet(nn.Module):
     def __init__(self, input_channels=1, model_channels=128, out_channels=1, 
@@ -591,12 +646,12 @@ class DDPMModel(BaseModel):
             parser.add_argument('--batch_size', type=int, default=8, help='input batch size')
             parser.add_argument('--sample_interval', type=int, default=1000, help='how many iterations to sample')
             # Add new architecture parameters
-            parser.add_argument('--dim', type=int, default=2048, help='base dimension for enhanced unet')
-            parser.add_argument('--time_dim', type=int, default=512, help='timestep embedding dimension')
-            parser.add_argument('--depth', type=int, default=2, help='transformer depth')
-            parser.add_argument('--heads', type=int, default=8, help='transformer heads')
-            parser.add_argument('--dim_head', type=int, default=96, help='dimension per head')
-            parser.add_argument('--mlp_ratio', type=int, default=4, help='mlp expansion ratio')
+            parser.add_argument('--dim', type=int, default=4096, help='base dimension for enhanced unet')
+            parser.add_argument('--time_dim', type=int, default=1024, help='timestep embedding dimension')
+            parser.add_argument('--depth', type=int, default=6, help='transformer depth')
+            parser.add_argument('--heads', type=int, default=16, help='transformer heads')
+            parser.add_argument('--dim_head', type=int, default=128, help='dimension per head')
+            parser.add_argument('--mlp_ratio', type=int, default=8, help='mlp expansion ratio')
             parser.add_argument('--drop_rate', type=float, default=0.1, help='dropout rate')
             
         return parser
