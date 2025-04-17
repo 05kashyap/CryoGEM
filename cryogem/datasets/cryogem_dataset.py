@@ -41,21 +41,12 @@ class CryoGEMDataset(BaseDataset):
         else:
             index_A = index
             index_map = index % self.len_weight_map
-        
-        # Load weight map on demand if not preloaded
-        if index_map < len(self.preloaded_maps):
-            weight_map = self.preloaded_maps[index_map]
-        else:
-            map_path = self.weight_map_paths[index_map]
-            image = Image.open(map_path).convert('L')
-            weight_map = np.array(image)
-            weight_map = weight_map / weight_map.max()
             
         micrograph_A = self.micrographs_A[index_A]
         if self.opt.phase == 'train':
             micrograph_B = self.micrographs_B[index_B]
         mask_A = micrograph_A.get_mask()
-        weight_map = self.weight_maps[index_map]
+        weight_map = self._load_weight_map(index_map)
         
         A, mask_A, weight_map = custom_transform(
             micrograph_A.get_micrograph(), 
@@ -156,19 +147,41 @@ class CryoGEMDataset(BaseDataset):
         paths_map = os.listdir(opt.weight_map_dir)
         paths_map.sort()
         
-        # Limit the number of weight maps loaded into memory
-        paths_map = paths_map[:self.max_dataset_size]
+        # Limit the weight maps to match max_dataset_size
+        if len(paths_map) > self.max_dataset_size:
+            paths_map = paths_map[:self.max_dataset_size]
         
+        logger.info(f"Found {len(paths_map)} weight maps in {opt.weight_map_dir}")
+        
+        # Store paths instead of loading all images
         self.weight_map_paths = [os.path.join(opt.weight_map_dir, path) for path in paths_map]
         self.len_weight_map = len(self.weight_map_paths)
         
-        # Load a small subset into memory for faster access during initial training
-        preload_count = min(100, self.len_weight_map)
-        self.preloaded_maps = []
+        # Create a cache for recently used weight maps
+        self.weight_map_cache = {}
+        self.max_cache_size = min(100, self.len_weight_map)  # Cache at most 100 weight maps
         
-        for i in tqdm(range(preload_count), desc="Preloading weight maps"):
-            image = Image.open(self.weight_map_paths[i]).convert('L')
-            image = np.array(image)
-            image = image / image.max()
-            self.preloaded_maps.append(image)      
-    
+        # Preload first few weight maps to avoid frequent disk access during initial training
+        logger.info(f"Preloading {min(10, self.len_weight_map)} weight maps for faster initial access")
+        for i in range(min(10, self.len_weight_map)):
+            self._load_weight_map(i)
+            
+        logger.info(f"Weight map loading complete, using lazy loading for {self.len_weight_map} maps")
+
+    def _load_weight_map(self, index):
+        """Helper method to load a single weight map and cache it"""
+        if index in self.weight_map_cache:
+            return self.weight_map_cache[index]
+        
+        map_path = self.weight_map_paths[index]
+        image = Image.open(map_path).convert('L')
+        image = np.array(image)
+        image = image / image.max()
+        
+        # Add to cache and manage cache size
+        self.weight_map_cache[index] = image
+        if len(self.weight_map_cache) > self.max_cache_size:
+            # Remove the least recently used item
+            self.weight_map_cache.pop(next(iter(self.weight_map_cache)))
+            
+        return image
