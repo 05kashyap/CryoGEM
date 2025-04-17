@@ -47,8 +47,6 @@ def add_args(parser):
     parser.add_argument("--mask_threshold", type=float, default=0.9, help="Threshold to generate particle mask.")
     return parser
 
-# Replace the existing main function with this batched version
-
 def main(opt):
     mkbasedir(opt.save_dir)
     warnexists(opt.save_dir)
@@ -75,7 +73,7 @@ def main(opt):
     opt.batch_size = min(1000, int(opt.particles_mu * 2))
     
     # Process micrographs in batches to save memory
-    max_mics_per_batch = 500  # Adjust this based on your memory constraints
+    max_mics_per_batch = 2000  # Adjust this based on your memory constraints
     num_batches = (n_micrographs + max_mics_per_batch - 1) // max_mics_per_batch
     
     # Arrays to collect all rotations and particles for final saving
