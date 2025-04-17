@@ -41,6 +41,15 @@ class CryoGEMDataset(BaseDataset):
         else:
             index_A = index
             index_map = index % self.len_weight_map
+        
+        # Load weight map on demand if not preloaded
+        if index_map < len(self.preloaded_maps):
+            weight_map = self.preloaded_maps[index_map]
+        else:
+            map_path = self.weight_map_paths[index_map]
+            image = Image.open(map_path).convert('L')
+            weight_map = np.array(image)
+            weight_map = weight_map / weight_map.max()
             
         micrograph_A = self.micrographs_A[index_A]
         if self.opt.phase == 'train':
@@ -147,16 +156,19 @@ class CryoGEMDataset(BaseDataset):
         paths_map = os.listdir(opt.weight_map_dir)
         paths_map.sort()
         
-        # paths_map = paths_map[:self.max_dataset_size]
-
-        self.weight_maps = []
-        for path in tqdm(paths_map, desc="Loading weight maps"):
-            map_path = os.path.join(opt.weight_map_dir, path)
-            image = Image.open(map_path).convert('L')
+        # Limit the number of weight maps loaded into memory
+        paths_map = paths_map[:self.max_dataset_size]
+        
+        self.weight_map_paths = [os.path.join(opt.weight_map_dir, path) for path in paths_map]
+        self.len_weight_map = len(self.weight_map_paths)
+        
+        # Load a small subset into memory for faster access during initial training
+        preload_count = min(100, self.len_weight_map)
+        self.preloaded_maps = []
+        
+        for i in tqdm(range(preload_count), desc="Preloading weight maps"):
+            image = Image.open(self.weight_map_paths[i]).convert('L')
             image = np.array(image)
             image = image / image.max()
-            self.weight_maps.append(image)
-        
-        self.weight_maps = np.stack(self.weight_maps, axis=0)
-        self.len_weight_map = self.weight_maps.shape[0]            
+            self.preloaded_maps.append(image)      
     
