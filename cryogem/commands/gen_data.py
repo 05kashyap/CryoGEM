@@ -228,42 +228,76 @@ def main(opt):
         part_shape_i = np.load(part_file).shape
         total_particles += part_shape_i[0]
     
-    # Pre-allocate properly sized arrays
+    # Create memory-mapped output files instead of in-memory arrays
     rot_shape[0] = total_particles
     part_shape[0] = total_particles
-    combined_rotations = np.zeros(rot_shape, dtype=first_rot.dtype)
-    combined_particles = np.zeros(part_shape, dtype=first_part.dtype)
     
-    # Copy data from memory-mapped files
+    rot_combined_file = os.path.join(temp_dir, "combined_rotations.npy")
+    part_combined_file = os.path.join(temp_dir, "combined_particles.npy")
+    
+    # Create empty files of the right size
+    combined_rotations = np.lib.format.open_memmap(
+        rot_combined_file, mode='w+', 
+        dtype=first_rot.dtype, shape=tuple(rot_shape))
+    
+    combined_particles = np.lib.format.open_memmap(
+        part_combined_file, mode='w+', 
+        dtype=first_part.dtype, shape=tuple(part_shape))
+    
+    # Copy data from memory-mapped files in smaller chunks
     start_idx = 0
     for rot_file, part_file in zip(rotation_files, particle_files):
-        rot_data = np.load(rot_file)
-        part_data = np.load(part_file)
+        logger.info(f"Processing {rot_file} for combination")
+        
+        # Load with memory mapping
+        rot_data = np.load(rot_file, mmap_mode='r')
+        part_data = np.load(part_file, mmap_mode='r')
         batch_size = rot_data.shape[0]
         
-        combined_rotations[start_idx:start_idx+batch_size] = rot_data
-        combined_particles[start_idx:start_idx+batch_size] = part_data
+        # Process in smaller chunks to avoid memory issues
+        chunk_size = 1000  # Adjust based on your memory constraints
+        for chunk_start in range(0, batch_size, chunk_size):
+            chunk_end = min(chunk_start + chunk_size, batch_size)
+            chunk_slice = slice(chunk_start, chunk_end)
+            
+            # Copy the chunk to the combined array
+            dest_slice = slice(start_idx + chunk_start, start_idx + chunk_end)
+            combined_rotations[dest_slice] = rot_data[chunk_slice]
+            combined_particles[dest_slice] = part_data[chunk_slice]
+            
+            # Force flush to disk
+            combined_rotations.flush()
+            combined_particles.flush()
+        
         start_idx += batch_size
         
-        # Clean up to free memory
+        # Clean up
         del rot_data
         del part_data
         gc.collect()
     
+    # Ensure data is written to disk
+    combined_rotations.flush()
+    combined_particles.flush()
+    
     # Save metadata
-    opt.resized_particles = combined_particles.shape
-    opt.rotations = combined_rotations.shape
+    opt.resized_particles = tuple(combined_particles.shape)
+    opt.rotations = tuple(combined_rotations.shape)
     opt.func = None
     opt._parser = None
     with open(osp.join(save_dir, 'opt.json'), 'w') as f:
-        json.dump(vars(opt), f)
+        json.dump(vars(opt), f, default=lambda x: str(x) if not isinstance(x, (int, float, str, list, dict, bool, type(None))) else x)
 
-    # Save rotations and resized_particles
+    # Save rotations and resized_particles (copy from memory-mapped file)
+    logger.info(f"Saving final rotations and particles to {save_dir}")
     np.save(osp.join(save_dir, 'rotations.npy'), combined_rotations)
     np.save(osp.join(save_dir, 'particles.npy'), combined_particles)
     
     # Cleanup temporary directory
     logger.info(f"Cleaning up temporary files in {temp_dir}")
+    del combined_rotations
+    del combined_particles
+    gc.collect()
     shutil.rmtree(temp_dir)
 
 def worker(name, 
