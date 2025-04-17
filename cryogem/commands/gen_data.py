@@ -73,7 +73,7 @@ def main(opt):
     opt.batch_size = min(1000, int(opt.particles_mu * 2))
     
     # Process micrographs in batches to save memory
-    max_mics_per_batch = 1000  # Adjust this based on your memory constraints
+    max_mics_per_batch = 500  # Adjust this based on your memory constraints
     num_batches = (n_micrographs + max_mics_per_batch - 1) // max_mics_per_batch
     
     # Arrays to collect all rotations and particles for final saving
