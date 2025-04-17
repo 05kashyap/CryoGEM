@@ -48,7 +48,7 @@ class DDPM(nn.Module):
     def p_losses(self, x_start, t, noise=None):
         """Calculate loss for denoising using combined L1 and MSE losses"""
         if noise is None:
-        noise = torch.randn_like(x_start)
+            noise = torch.randn_like(x_start)
         
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
         predicted_noise = self.denoise_fn(x_noisy, t)
