@@ -11,7 +11,7 @@
 # python -m cryogem gen_data --mode homo --device cuda:0 \
 #   --input_map testing/data/exp_abinitio_volumes/densitymap.10028.90.mrc \
 #   --save_dir save_images/ddpm_data/train \
-#   --n_micrographs 1000 --particle_size 90 --mask_threshold 0.9
+#   --n_micrographs 5000 --particle_size 90 --mask_threshold 0.9
 
 # python -m cryogem gen_data --mode homo --device cuda:0 \
 #   --input_map testing/data/exp_abinitio_volumes/densitymap.10028.90.mrc \
@@ -23,8 +23,8 @@
 # Diffusion timesteps reduced from 1000
 python -m cryogem ddpm_pipeline --dataset "Ribosome(10028)" \
   --gpu 0 \
-  --training_samples 500 \
-  --testing_samples 250 \
+  --training_samples 5000 \
+  --testing_samples 500 \
   --epochs 2 \
   --timesteps 1000 \
   --batch_size 32 \
