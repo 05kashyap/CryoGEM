@@ -47,6 +47,8 @@ def add_args(parser):
     parser.add_argument("--mask_threshold", type=float, default=0.9, help="Threshold to generate particle mask.")
     return parser
 
+# Replace the existing main function with this batched version
+
 def main(opt):
     mkbasedir(opt.save_dir)
     warnexists(opt.save_dir)
@@ -69,96 +71,137 @@ def main(opt):
     os.makedirs(particles_mask_dir, exist_ok=True)
     os.makedirs(mics_particle_info_dir, exist_ok=True)
     
-    opt.n_particles = int(opt.particles_mu * opt.n_micrographs * 1.2)
-    opt.batch_size = int(opt.particles_mu * 10)
+    # Fixed batch size
+    opt.batch_size = min(1000, int(opt.particles_mu * 2))
     
-    if mode == 'homo':
-        resized_particles, rotations = generate_particles_homo(
-            opt.input_map,
-            opt.n_particles,
-            opt.particle_size,
-            opt.device,
-            symmetry=opt.symmetry
-        )
-    elif mode == 'hetero':
-        resized_particles, rotations, z_values = generate_particles_hetero(
-            opt.n_particles,
-            opt.particle_size,
-            opt.device,
-            opt.drgn_dir,
-            opt.drgn_epoch,
-            opt.same_rot
-        )
-
-    sync_mics_name = [f'sync_mic_{i:04d}' for i in range(n_micrographs)]
-
-    if not opt.debug:
-        pbar = tqdm(total=len(sync_mics_name), unit='image', desc=f'Generating synthetic micrographs (parallelly)...')
-
-        batch_size = opt.batch_size
-        epochs = opt.n_micrographs // batch_size
-        if n_micrographs % batch_size != 0: epochs += 1
-        for epoch in range(epochs):
-            random_start = np.random.randint(0, resized_particles.shape[0] - batch_size + 1)
-            start = epoch * batch_size
-            end = min((epoch + 1) * batch_size, n_micrographs)
-            pool = Pool(opt.n_threads)
-            for name in sync_mics_name[start:end]:
-                pool.apply_async(worker, args=(
-                        name, 
-                        resized_particles[random_start:random_start + batch_size],
-                        rotations[random_start:random_start + batch_size],
-                        opt.particles_mu,
-                        opt.particles_sigma,
-                        [opt.micrograph_size, opt.micrograph_size],
-                        opt.particle_collapse_ratio,
-                        random_start,
-                        mics_mrc_dir,          
-                        mics_png_dir,          
-                        mics_mask_dir,         
-                        particles_mask_dir,    
-                        mics_particle_info_dir,
-                        mask_threshold,
-                    ), 
-                    callback=lambda arg: pbar.update(1)
-                )
-            pool.close()
-            pool.join()
-            
-        pbar.close()
-
-        logger.info('All processes done.')
+    # Process micrographs in batches to save memory
+    max_mics_per_batch = 500  # Adjust this based on your memory constraints
+    num_batches = (n_micrographs + max_mics_per_batch - 1) // max_mics_per_batch
     
-    else:
-        for name in tqdm(sync_mics_name, unit='image', desc=f'Generating synthetic micrographs ...'):
-            worker(
-                name, 
-                resized_particles,
-                rotations,
-                opt.particles_mu,
-                opt.particles_sigma,
-                [opt.micrograph_size, opt.micrograph_size],
-                opt.particle_collapse_ratio,
-                0,
-                mics_mrc_dir,          
-                mics_png_dir,          
-                mics_mask_dir,         
-                particles_mask_dir,    
-                mics_particle_info_dir,
-                mask_threshold,
+    # Arrays to collect all rotations and particles for final saving
+    all_rotations = []
+    all_particles = []
+    
+    for batch_idx in range(num_batches):
+        logger.info(f"Processing batch {batch_idx+1}/{num_batches}")
+        
+        # Calculate start and end indices for this batch
+        start_mic = batch_idx * max_mics_per_batch
+        end_mic = min((batch_idx + 1) * max_mics_per_batch, n_micrographs)
+        batch_mics = end_mic - start_mic
+        
+        # Calculate number of particles needed for this batch
+        batch_particles = int(opt.particles_mu * batch_mics * 1.2)
+        
+        logger.info(f"Generating {batch_particles} particles for micrographs {start_mic} to {end_mic-1}")
+        
+        # Generate just this batch's particles
+        if mode == 'homo':
+            resized_particles, rotations = generate_particles_homo(
+                opt.input_map,
+                batch_particles,
+                opt.particle_size,
+                opt.device,
+                symmetry=opt.symmetry
             )
+        elif mode == 'hetero':
+            resized_particles, rotations, z_values = generate_particles_hetero(
+                batch_particles,
+                opt.particle_size,
+                opt.device,
+                opt.drgn_dir,
+                opt.drgn_epoch,
+                opt.same_rot
+            )
+        
+        # Store for final saving
+        all_rotations.append(rotations)
+        all_particles.append(resized_particles)
+        
+        # Get micrograph names for this batch
+        sync_mics_name = [f'sync_mic_{i:04d}' for i in range(start_mic, end_mic)]
+        
+        if not opt.debug:
+            pbar = tqdm(total=len(sync_mics_name), unit='image', 
+                      desc=f'Generating synthetic micrographs batch {batch_idx+1}/{num_batches}...')
             
-    # copy json file
-    opt.resized_particles = resized_particles.shape
-    opt.rotations = rotations.shape
+            process_batch_size = opt.batch_size
+            batch_epochs = len(sync_mics_name) // process_batch_size
+            if len(sync_mics_name) % process_batch_size != 0: 
+                batch_epochs += 1
+                
+            for epoch in range(batch_epochs):
+                random_start = np.random.randint(0, resized_particles.shape[0] - process_batch_size + 1)
+                epoch_start = epoch * process_batch_size
+                epoch_end = min((epoch + 1) * process_batch_size, len(sync_mics_name))
+                
+                pool = Pool(opt.n_threads)
+                for name in sync_mics_name[epoch_start:epoch_end]:
+                    pool.apply_async(worker, args=(
+                            name, 
+                            resized_particles[random_start:random_start + process_batch_size],
+                            rotations[random_start:random_start + process_batch_size],
+                            opt.particles_mu,
+                            opt.particles_sigma,
+                            [opt.micrograph_size, opt.micrograph_size],
+                            opt.particle_collapse_ratio,
+                            random_start + batch_idx * batch_particles,  # offset for particle indexing
+                            mics_mrc_dir,          
+                            mics_png_dir,          
+                            mics_mask_dir,         
+                            particles_mask_dir,    
+                            mics_particle_info_dir,
+                            mask_threshold,
+                        ), 
+                        callback=lambda arg: pbar.update(1)
+                    )
+                pool.close()
+                pool.join()
+                
+            pbar.close()
+        else:
+            for name in tqdm(sync_mics_name, unit='image', desc=f'Generating synthetic micrographs batch {batch_idx+1}/{num_batches}...'):
+                worker(
+                    name, 
+                    resized_particles,
+                    rotations,
+                    opt.particles_mu,
+                    opt.particles_sigma,
+                    [opt.micrograph_size, opt.micrograph_size],
+                    opt.particle_collapse_ratio,
+                    batch_idx * batch_particles,  # offset for particle indexing
+                    mics_mrc_dir,          
+                    mics_png_dir,          
+                    mics_mask_dir,         
+                    particles_mask_dir,    
+                    mics_particle_info_dir,
+                    mask_threshold,
+                )
+        
+        # Free memory
+        del resized_particles
+        del rotations
+        import gc
+        gc.collect()
+        
+    logger.info('All batches processed successfully!')
+    
+    # Combine all rotations and particles
+    logger.info('Combining particle data...')
+    combined_rotations = np.concatenate(all_rotations, axis=0)
+    combined_particles = np.concatenate(all_particles, axis=0)
+    
+    # Save metadata
+    opt.resized_particles = combined_particles.shape
+    opt.rotations = combined_rotations.shape
     opt.func = None
     opt._parser = None
     with open(osp.join(save_dir, 'opt.json'), 'w') as f:
         json.dump(vars(opt), f)
 
-    # save rotations and resized_particles
-    np.save(osp.join(save_dir, 'rotations.npy'), rotations)
-    np.save(osp.join(save_dir, 'particles.npy'), resized_particles)
+    # Save rotations and resized_particles
+    np.save(osp.join(save_dir, 'rotations.npy'), combined_rotations)
+    np.save(osp.join(save_dir, 'particles.npy'), combined_particles)
 
 def worker(name, 
            resized_particles,
