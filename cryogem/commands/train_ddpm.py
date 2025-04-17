@@ -49,15 +49,173 @@ def extra_add_args(parser):
     parser.add_argument("--display_id", type=int, default=0, help="window id of the web display")
     parser.add_argument("--display_port", type=int, default=8097, help="port of the web display")
     parser.add_argument("--display_ncols", type=int, default=4, help="number of images per row in the web display")
-    # Don't redefine batch_size here as it's already in base_add_args
+    parser.add_argument("--max_repetitions", type=int, default=5, help="maximum number of repetitions for repetitive training")
     
     # Override default values from base_add_args
-    parser.set_defaults(batch_size=8)  # Set batch size this way instead
+    parser.set_defaults(batch_size=8)  
+
 def add_args(parser):
     base_add_args(parser)
     extra_add_args(parser)
     parser.set_defaults(dataset_mode="cryogem", model="ddpm", name="ddpm")
     return parser
+
+# def main(args):
+#     opt = process_opt(args)
+    
+#     # Create directories for saving results
+#     if not os.path.exists(opt.save_dir):
+#         os.makedirs(opt.save_dir)
+        
+#     logger.info(f"Starting DDPM training with {opt.timesteps} timesteps and {opt.beta_schedule} schedule")
+#     logger.info(f"Training on data from {opt.sync_dir}")
+    
+#     # Create dataset
+#     dataset = create_dataset(opt)
+#     dataset_size = len(dataset)
+#     logger.info(f"The number of training images = {dataset_size}")
+    
+#     # Create model
+#     model = DDPMModel(opt)
+#     model.setup(opt)
+    
+#     # Create visualizer
+#     visualizer = Visualizer(opt)
+#     total_iters = 0
+    
+#     # Create sample directory
+#     samples_dir = os.path.join(opt.save_dir, "samples")
+#     mkdirs(samples_dir)
+    
+#     # Training loop
+#     for epoch in range(opt.n_epochs):
+#         epoch_start_time = time.time()
+#         iter_data_time = time.time()
+#         epoch_iter = 0
+#         visualizer.reset()
+        
+#         for i, data in enumerate(tqdm(dataset, desc=f"Epoch {epoch}/{opt.n_epochs}, iters: {epoch_iter}/{dataset_size}")):
+
+#             iter_start_time = time.time()
+            
+#             if total_iters % opt.print_freq == 0:
+#                 t_data = iter_start_time - iter_data_time
+                
+#             total_iters += opt.batch_size
+#             epoch_iter += opt.batch_size
+            
+#             # Set model input
+#             model.set_input(data)
+#             # Update model weights
+#             model.optimize_parameters()
+            
+#             # Display images
+#             if total_iters % opt.display_freq == 0:
+#                 save_result = total_iters % opt.update_html_freq == 0
+#                 # Generate a batch of samples for visualization
+#                 model.forward()
+#                 visuals = model.get_current_visuals()
+#                 visualizer.display_current_results(visuals, epoch, save_result)
+                
+#             # Print losses
+#             if total_iters % opt.print_freq == 0:
+#                 losses = model.get_current_losses()
+#                 t_comp = (time.time() - iter_start_time) / opt.batch_size
+#                 visualizer.print_current_losses(epoch, epoch_iter, losses, t_comp, t_data)
+                
+#             # Sample images at regular intervals
+#             if total_iters % opt.sample_interval == 0:
+#                 with torch.no_grad():
+#                     samples = model.generate_samples(n_samples=4, size=opt.crop_size)
+#                     for j, sample in enumerate(samples):
+#                         sample_np = sample.squeeze().cpu().numpy()
+#                         save_path = os.path.join(samples_dir, f"iter{total_iters}_sample{j}.png")
+#                         save_as_png(sample_np, save_path)
+                        
+#                         # Also save as mrc for scientific visualization
+#                         mrc_path = os.path.join(samples_dir, f"iter{total_iters}_sample{j}.mrc")
+#                         save_as_mrc(sample_np, mrc_path)
+                        
+#             iter_data_time = time.time()
+            
+#         # Save model at end of epoch
+#         if epoch % opt.save_epoch_freq == 0:
+#             logger.info(f"saving the model at the end of epoch {epoch}")
+#             model.save_networks(epoch)
+            
+#         # Update learning rate
+#         model.update_learning_rate()
+        
+#         logger.info(f"End of epoch {epoch} / {opt.n_epochs + opt.n_epochs_decay} \t "+
+#                    f"Time Taken: {time.time() - epoch_start_time} sec")
+
+#     model.save_networks('latest')  # Add this line to save latest at the very end
+#     model.save_networks(epoch)     # Add this line to save final epoch
+#     logger.info("Training completed.")
+
+def train_epoch(model, dataset, opt, visualizer, epoch, total_iters, samples_dir):
+    """Single epoch training function that can be repeated if needed"""
+    epoch_start_time = time.time()
+    iter_data_time = time.time()
+    epoch_iter = 0
+    dataset_size = len(dataset)
+    running_loss = 0.0
+    num_batches = 0
+    
+    for i, data in enumerate(tqdm(dataset, desc=f"Epoch {epoch}/{opt.n_epochs}, iters: {epoch_iter}/{dataset_size}")):
+        iter_start_time = time.time()
+        
+        if total_iters % opt.print_freq == 0:
+            t_data = iter_start_time - iter_data_time
+            
+        total_iters += opt.batch_size
+        epoch_iter += opt.batch_size
+        
+        # Set model input
+        model.set_input(data)
+        # Update model weights
+        model.optimize_parameters()
+        
+        # Accumulate loss for average calculation
+        losses = model.get_current_losses()
+        running_loss += losses['DDPM']
+        num_batches += 1
+        
+        # Display images
+        if total_iters % opt.display_freq == 0:
+            save_result = total_iters % opt.update_html_freq == 0
+            # Generate a batch of samples for visualization
+            model.forward()
+            visuals = model.get_current_visuals()
+            visualizer.display_current_results(visuals, epoch, save_result)
+            
+        # Print losses
+        if total_iters % opt.print_freq == 0:
+            t_comp = (time.time() - iter_start_time) / opt.batch_size
+            visualizer.print_current_losses(epoch, epoch_iter, losses, t_comp, t_data)
+            
+        # Sample images at regular intervals
+        if total_iters % opt.sample_interval == 0:
+            with torch.no_grad():
+                samples = model.generate_samples(n_samples=4, size=opt.crop_size)
+                for j, sample in enumerate(samples):
+                    sample_np = sample.squeeze().cpu().numpy()
+                    save_path = os.path.join(samples_dir, f"iter{total_iters}_sample{j}.png")
+                    save_as_png(sample_np, save_path)
+                    
+                    # Also save as mrc for scientific visualization
+                    mrc_path = os.path.join(samples_dir, f"iter{total_iters}_sample{j}.mrc")
+                    save_as_mrc(sample_np, mrc_path)
+                    
+        iter_data_time = time.time()
+    
+    epoch_avg_loss = running_loss / num_batches if num_batches > 0 else float('inf')
+    epoch_time = time.time() - epoch_start_time
+    
+    logger.info(f"End of epoch {epoch} / {opt.n_epochs} \t "+
+               f"Time Taken: {epoch_time} sec, Avg Loss: {epoch_avg_loss:.6f}")
+    
+    return total_iters, epoch_avg_loss
 
 def main(args):
     opt = process_opt(args)
@@ -86,71 +244,52 @@ def main(args):
     samples_dir = os.path.join(opt.save_dir, "samples")
     mkdirs(samples_dir)
     
+    # Initialize repetitive training variables
+    global_min_loss = float('inf')
+    
     # Training loop
-    for epoch in range(opt.n_epochs):
-        epoch_start_time = time.time()
-        iter_data_time = time.time()
-        epoch_iter = 0
-        visualizer.reset()
+    for epoch in range(opt.epoch_count, opt.n_epochs):
+        # Initial epoch training
+        total_iters, epoch_avg_loss = train_epoch(
+            model, dataset, opt, visualizer, epoch, total_iters, samples_dir
+        )
         
-        for i, data in enumerate(tqdm(dataset, desc=f"Epoch {epoch}/{opt.n_epochs}, iters: {epoch_iter}/{dataset_size}")):
-
-            iter_start_time = time.time()
+        # Update global minimum loss
+        if epoch_avg_loss < global_min_loss:
+            global_min_loss = epoch_avg_loss
+            logger.info(f"New global minimum loss: {global_min_loss:.6f}")
+        
+        # Implement repetitive training technique
+        repetitions = 0
+        while epoch_avg_loss > global_min_loss and repetitions < opt.max_repetitions:
+            repetitions += 1
+            logger.info(f"Epoch {epoch}: Loss {epoch_avg_loss:.6f} > Global min {global_min_loss:.6f}")
+            logger.info(f"Repeating epoch {epoch} (repetition {repetitions}/{opt.max_repetitions})")
             
-            if total_iters % opt.print_freq == 0:
-                t_data = iter_start_time - iter_data_time
-                
-            total_iters += opt.batch_size
-            epoch_iter += opt.batch_size
+            # Retrain with same data
+            total_iters, epoch_avg_loss = train_epoch(
+                model, dataset, opt, visualizer, 
+                epoch, total_iters, samples_dir
+            )
             
-            # Set model input
-            model.set_input(data)
-            # Update model weights
-            model.optimize_parameters()
-            
-            # Display images
-            if total_iters % opt.display_freq == 0:
-                save_result = total_iters % opt.update_html_freq == 0
-                # Generate a batch of samples for visualization
-                model.forward()
-                visuals = model.get_current_visuals()
-                visualizer.display_current_results(visuals, epoch, save_result)
-                
-            # Print losses
-            if total_iters % opt.print_freq == 0:
-                losses = model.get_current_losses()
-                t_comp = (time.time() - iter_start_time) / opt.batch_size
-                visualizer.print_current_losses(epoch, epoch_iter, losses, t_comp, t_data)
-                
-            # Sample images at regular intervals
-            if total_iters % opt.sample_interval == 0:
-                with torch.no_grad():
-                    samples = model.generate_samples(n_samples=4, size=opt.crop_size)
-                    for j, sample in enumerate(samples):
-                        sample_np = sample.squeeze().cpu().numpy()
-                        save_path = os.path.join(samples_dir, f"iter{total_iters}_sample{j}.png")
-                        save_as_png(sample_np, save_path)
-                        
-                        # Also save as mrc for scientific visualization
-                        mrc_path = os.path.join(samples_dir, f"iter{total_iters}_sample{j}.mrc")
-                        save_as_mrc(sample_np, mrc_path)
-                        
-            iter_data_time = time.time()
-            
-        # Save model at end of epoch
+            # Update global minimum if needed
+            if epoch_avg_loss < global_min_loss:
+                global_min_loss = epoch_avg_loss
+                logger.info(f"New global minimum loss after repetition: {global_min_loss:.6f}")
+        
+        # Save model at end of epoch (after all repetitions)
         if epoch % opt.save_epoch_freq == 0:
-            logger.info(f"saving the model at the end of epoch {epoch}")
+            logger.info(f"Saving the model at the end of epoch {epoch}")
             model.save_networks(epoch)
             
         # Update learning rate
         model.update_learning_rate()
-        
-        logger.info(f"End of epoch {epoch} / {opt.n_epochs + opt.n_epochs_decay} \t "+
-                   f"Time Taken: {time.time() - epoch_start_time} sec")
 
-    model.save_networks('latest')  # Add this line to save latest at the very end
-    model.save_networks(epoch)     # Add this line to save final epoch
+    # Save final model
+    model.save_networks('latest')
+    model.save_networks(epoch)
     logger.info("Training completed.")
+    
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     main(add_args(parser).parse_args())
