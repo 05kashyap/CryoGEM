@@ -46,16 +46,23 @@ class DDPM(nn.Module):
         return sqrt_alphas_cumprod_t * x_start + sqrt_one_minus_alphas_cumprod_t * noise
     
     def p_losses(self, x_start, t, noise=None):
-        """Calculate loss for denoising"""
+        """Calculate loss for denoising using combined L1 and MSE losses"""
         if noise is None:
-            noise = torch.randn_like(x_start)
-            
+        noise = torch.randn_like(x_start)
+        
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
         predicted_noise = self.denoise_fn(x_noisy, t)
         
-        loss = F.mse_loss(predicted_noise, noise)
+        # Calculate MSE loss
+        mse_loss = F.mse_loss(predicted_noise, noise)
         
-        return loss
+        # Calculate L1 (MAE) loss
+        l1_loss = F.l1_loss(predicted_noise, noise)
+        
+        # Combined loss (equal weighting)
+        loss = mse_loss + l1_loss
+        
+        return loss, mse_loss, l1_loss
     
     @torch.no_grad()
     def p_sample(self, x, t, t_index):
@@ -665,8 +672,8 @@ class DDPMModel(BaseModel):
         # Sample timesteps uniformly
         t = torch.randint(0, self.timesteps, (self.real_A.size(0),), device=self.device).long()
         
-        # Calculate diffusion loss
-        self.loss = self.netDiffusion.p_losses(self.real_A, t)
+        # Calculate diffusion losses
+        self.loss, self.mse_loss, self.l1_loss = self.netDiffusion.p_losses(self.real_A, t)
         self.loss.backward()
         
     def optimize_parameters(self):
@@ -677,7 +684,11 @@ class DDPMModel(BaseModel):
     
     def get_current_losses(self):
         """Return current losses"""
-        return {'DDPM': self.loss.item()}
+        return {
+            'DDPM': self.loss.item(),
+            'MSE': self.mse_loss.item(),
+            'L1': self.l1_loss.item()
+        }
     
     def generate_samples(self, n_samples=16, size=256):
         """Generate new samples from the diffusion model"""
