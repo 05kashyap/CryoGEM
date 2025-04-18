@@ -5,6 +5,7 @@ import logging
 import torch
 from tqdm import tqdm
 import numpy as np
+import gc
 
 from cryogem.options import process_opt, base_add_args
 from cryogem.datasets import create_dataset
@@ -161,39 +162,41 @@ def train_epoch(model, dataset, opt, visualizer, epoch, total_iters, samples_dir
     dataset_size = len(dataset)
     running_loss = 0.0
     num_batches = 0
-    
-    for i, data in enumerate(tqdm(dataset, desc=f"Epoch {epoch}/{opt.n_epochs}, iters: {epoch_iter}/{dataset_size}")):
+
+    pbar = tqdm(dataset, desc=f"Epoch {epoch}/{opt.n_epochs}, iters: {epoch_iter}/{dataset_size}")
+    for i, data in enumerate(pbar):
         iter_start_time = time.time()
-        
-        # Calculate t_data for all iterations, not just when printing
         t_data = iter_start_time - iter_data_time
-            
+
         total_iters += opt.batch_size
         epoch_iter += opt.batch_size
-        
+
         # Set model input
         model.set_input(data)
         # Update model weights
         model.optimize_parameters()
-        
+
         # Accumulate loss for average calculation
         losses = model.get_current_losses()
+        # Detach losses to avoid memory leak
+        losses = {k: (v.item() if torch.is_tensor(v) else float(v)) for k, v in losses.items()}
         running_loss += losses['DDPM']
         num_batches += 1
-        
+
         # Display images
         if total_iters % opt.display_freq == 0:
             save_result = total_iters % opt.update_html_freq == 0
-            # Generate a batch of samples for visualization
             model.forward()
             visuals = model.get_current_visuals()
+            # Detach all tensors in visuals
+            visuals = {k: (v.detach().cpu() if torch.is_tensor(v) else v) for k, v in visuals.items()}
             visualizer.display_current_results(visuals, epoch, save_result)
-            
+
         # Print losses
         if total_iters % opt.print_freq == 0:
             t_comp = (time.time() - iter_start_time) / opt.batch_size
             visualizer.print_current_losses(epoch, epoch_iter, losses, t_comp, t_data)
-            
+
         # Sample images at regular intervals
         if total_iters % opt.sample_interval == 0:
             with torch.no_grad():
@@ -202,19 +205,24 @@ def train_epoch(model, dataset, opt, visualizer, epoch, total_iters, samples_dir
                     sample_np = sample.squeeze().cpu().numpy()
                     save_path = os.path.join(samples_dir, f"iter{total_iters}_sample{j}.png")
                     save_as_png(sample_np, save_path)
-                    
-                    # Also save as mrc for scientific visualization
                     mrc_path = os.path.join(samples_dir, f"iter{total_iters}_sample{j}.mrc")
                     save_as_mrc(sample_np, mrc_path)
-                    
+
+        # Explicitly delete variables and clear cache to free RAM
+        del data, losses
+        torch.cuda.empty_cache()
+        gc.collect()
+
         iter_data_time = time.time()
-    
+
+    pbar.close()
+
     epoch_avg_loss = running_loss / num_batches if num_batches > 0 else float('inf')
     epoch_time = time.time() - epoch_start_time
-    
+
     logger.info(f"End of epoch {epoch} / {opt.n_epochs} \t "+
                f"Time Taken: {epoch_time} sec, Avg Loss: {epoch_avg_loss:.6f}")
-    
+
     return total_iters, epoch_avg_loss
 
 def main(args):
