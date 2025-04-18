@@ -33,7 +33,6 @@ class CryoGEMDataset(BaseDataset):
             self.load_real_micrographs(opt)
         
     def __getitem__(self, index):
-        
         if self.opt.phase == 'train':
             index_A = index % self.len_A
             index_B = random.randint(0, self.len_B - 1)
@@ -41,10 +40,18 @@ class CryoGEMDataset(BaseDataset):
         else:
             index_A = index
             index_map = index % self.len_weight_map
-            
-        micrograph_A = self.micrographs_A[index_A]
+
+        # Unpack paths and instantiate Micrograph on-the-fly
+        micrograph_A_path, particle_info_path, mask_path = self.micrographs_A[index_A]
+        micrograph_A = Micrograph(
+            micrograph_A_path,
+            particle_info_path=particle_info_path,
+            mask_path=mask_path,
+        )
+        
         if self.opt.phase == 'train':
             micrograph_B = self.micrographs_B[index_B]
+            micrograph_B = Micrograph(micrograph_B_path)
         mask_A = micrograph_A.get_mask()
         weight_map = self._load_weight_map(index_map)
         
@@ -112,19 +119,12 @@ class CryoGEMDataset(BaseDataset):
         self.micrographs_A = []
         for path in tqdm(paths_A, desc='Loading real_A'):
             name = path.split('.')[0]
-            
             micrograph_path = os.path.join(opt.sync_dir, path)
             particle_info_path = os.path.join(opt.pose_dir, name + '.json') if opt.pose_dir else None
             mask_path = os.path.join(opt.mask_dir, name + '.png') if opt.mask_dir else None
-            
-            micrograph = Micrograph(
-                micrograph_path,
-                particle_info_path=particle_info_path,
-                mask_path=mask_path,
-            )
-
-            self.micrographs_A.append(micrograph)
-        self.len_A = len(self.micrographs_A)    
+            # Store tuple of paths instead of Micrograph object
+            self.micrographs_A.append((micrograph_path, particle_info_path, mask_path))
+        self.len_A = len(self.micrographs_A)
 
     def load_real_micrographs(self, opt):
         paths_B = os.listdir(opt.real_dir)
@@ -135,12 +135,13 @@ class CryoGEMDataset(BaseDataset):
             else:
                 paths_B = paths_B[self.max_dataset_size:self.max_dataset_size+opt.num_test]
         self.micrographs_B = []
-        for path in tqdm(paths_B, desc='Loading real_B'):
-            micrograph_path     = os.path.join(opt.real_dir, path)
-            micrograph = Micrograph(
-                micrograph_path,
-            )
-            self.micrographs_B.append(micrograph)
+        # for path in tqdm(paths_B, desc='Loading real_B'):
+        #     micrograph_path     = os.path.join(opt.real_dir, path)
+        #     micrograph = Micrograph(
+        #         micrograph_path,
+        #     )
+        #     self.micrographs_B.append(micrograph)
+        self.micrographs_B = [os.path.join(opt.real_dir, path) for path in paths_B]
         self.len_B = len(self.micrographs_B)
         
     def load_weight_maps(self, opt):
