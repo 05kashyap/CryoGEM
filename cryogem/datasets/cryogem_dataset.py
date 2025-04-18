@@ -48,9 +48,9 @@ class CryoGEMDataset(BaseDataset):
             particle_info_path=particle_info_path,
             mask_path=mask_path,
         )
-        
+
         if self.opt.phase == 'train':
-            micrograph_B = self.micrographs_B[index_B]
+            micrograph_B_path = self.micrographs_B[index_B]
             micrograph_B = Micrograph(micrograph_B_path)
         mask_A = micrograph_A.get_mask()
         weight_map = self._load_weight_map(index_map)
