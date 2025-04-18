@@ -74,8 +74,7 @@ def main(args):
         "--n_micrographs", str(args.training_samples),
         "--particle_size", "90",
         "--mask_threshold", "0.9",
-        "--n_particles", str(max(1000, int(args.training_samples * 100 * 1.2))),  # Ensure enough particles
-        "--batch_size", "8"  # Set a small batch size
+        "--n_particles", str(max(1000, int(args.training_samples * 100 * 1.2))) # Ensure enough particles
     ]
     run_command(cmd_gen_training, "Generate training data")
 
