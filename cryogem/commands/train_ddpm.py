@@ -165,8 +165,8 @@ def train_epoch(model, dataset, opt, visualizer, epoch, total_iters, samples_dir
     for i, data in enumerate(tqdm(dataset, desc=f"Epoch {epoch}/{opt.n_epochs}, iters: {epoch_iter}/{dataset_size}")):
         iter_start_time = time.time()
         
-        if total_iters % opt.print_freq == 0:
-            t_data = iter_start_time - iter_data_time
+        # Calculate t_data for all iterations, not just when printing
+        t_data = iter_start_time - iter_data_time
             
         total_iters += opt.batch_size
         epoch_iter += opt.batch_size
