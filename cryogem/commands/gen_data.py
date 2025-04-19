@@ -79,7 +79,7 @@ def main(opt):
     opt.batch_size = min(1000, int(opt.particles_mu * 2))
     
     # Process micrographs in smaller batches to save memory
-    max_mics_per_batch = 400  # Reduced from 1000 to avoid memory issues
+    max_mics_per_batch = 1000  # Reduced from 1000 to avoid memory issues
     num_batches = (n_micrographs + max_mics_per_batch - 1) // max_mics_per_batch
     
     # Create temporary directory for memory-mapped files
