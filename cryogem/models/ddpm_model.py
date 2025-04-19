@@ -59,8 +59,8 @@ class DDPM(nn.Module):
         # Calculate L1 (MAE) loss
         l1_loss = F.l1_loss(predicted_noise, noise)
         
-        # Combined loss (equal weighting)
-        loss = mse_loss + l1_loss
+        # Combined loss (more l1 weighting)
+        loss = mse_loss + 2.0*l1_loss
         
         return loss, mse_loss, l1_loss
     
