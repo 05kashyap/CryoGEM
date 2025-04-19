@@ -31,11 +31,10 @@ class ImageDataset(Dataset):
     
     def __getitem__(self, idx):
         img_path = os.path.join(self.path, self.files[idx])
-        img = Image.open(img_path).convert('RGB')
-        
+        img = Image.open(img_path).convert('L')  # Always load as grayscale
+        img = img.convert('RGB')                 # Convert to 3-channel
         if self.transform:
             img = self.transform(img)
-            
         return img
 
 def compute_statistics_of_path(path, model, batch_size, device):
@@ -44,8 +43,7 @@ def compute_statistics_of_path(path, model, batch_size, device):
         transforms.Compose([
             transforms.Resize((299, 299)),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                               std=[0.229, 0.224, 0.225]),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
         ])
     )
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=4)
@@ -126,6 +124,8 @@ def main(args):
         for j, sample in enumerate(samples):
             sample_idx = i * args.batch_size + j
             sample_np = ((sample.squeeze().cpu().numpy() + 1) / 2 * 255).astype(np.uint8)
+            if sample_np.ndim == 2:
+                sample_np = np.stack([sample_np]*3, axis=-1)  # Make 3-channel
             img = Image.fromarray(sample_np)
             img.save(os.path.join(args.generated_images_dir, f"sample_{sample_idx:05d}.png"))
     
