@@ -89,216 +89,233 @@ def main(opt):
     # Arrays to track file paths for memory mapped arrays
     rotation_files = []
     particle_files = []
-    
-    # Process data in batches
-    for batch_idx in range(num_batches):
-        logger.info(f"Processing batch {batch_idx+1}/{num_batches}")
-        
-        # Calculate start and end indices for this batch
-        start_mic = batch_idx * max_mics_per_batch
-        end_mic = min((batch_idx + 1) * max_mics_per_batch, n_micrographs)
-        batch_mics = end_mic - start_mic
-        
-        # Calculate number of particles needed for this batch
-        batch_particles = int(opt.particles_mu * batch_mics * 1.2)
-        
-        logger.info(f"Generating {batch_particles} particles for micrographs {start_mic} to {end_mic-1}")
-        
-        # Generate just this batch's particles
-        if mode == 'homo':
-            resized_particles, rotations = generate_particles_homo(
-                opt.input_map,
-                batch_particles,
-                opt.particle_size,
-                opt.device,
-                symmetry=opt.symmetry
-            )
-        elif mode == 'hetero':
-            resized_particles, rotations, z_values = generate_particles_hetero(
-                batch_particles,
-                opt.particle_size,
-                opt.device,
-                opt.drgn_dir,
-                opt.drgn_epoch,
-                opt.same_rot
-            )
-        
-        # Create memory-mapped files for this batch
-        rot_file = os.path.join(temp_dir, f"rotations_batch_{batch_idx}.npy")
-        part_file = os.path.join(temp_dir, f"particles_batch_{batch_idx}.npy")
-        
-        # Save the arrays to disk
-        np.save(rot_file, rotations)
-        np.save(part_file, resized_particles)
-        
-        # Track the files
-        rotation_files.append(rot_file)
-        particle_files.append(part_file)
-        
-        # Now load with memory mapping for processing
-        mem_rotations = np.load(rot_file, mmap_mode='r')
-        mem_particles = np.load(part_file, mmap_mode='r')
-        
-        # Get micrograph names for this batch
-        sync_mics_name = [f'sync_mic_{i:04d}' for i in range(start_mic, end_mic)]
-        
-        if not opt.debug:
-            pbar = tqdm(total=len(sync_mics_name), unit='image', 
-                      desc=f'Generating synthetic micrographs batch {batch_idx+1}/{num_batches}...')
-            
-            # Process in smaller sub-batches for better memory management
-            process_batch_size = opt.batch_size
-            batch_epochs = len(sync_mics_name) // process_batch_size
-            if len(sync_mics_name) % process_batch_size != 0: 
-                batch_epochs += 1
-                
-            for epoch in range(batch_epochs):
-                # Use a smaller number of threads to reduce memory pressure
-                n_threads = min(opt.n_threads, 6)
-                random_start = np.random.randint(0, mem_particles.shape[0] - process_batch_size + 1)
-                epoch_start = epoch * process_batch_size
-                epoch_end = min((epoch + 1) * process_batch_size, len(sync_mics_name))
-                
-                pool = Pool(n_threads)
-                for name in sync_mics_name[epoch_start:epoch_end]:
-                    pool.apply_async(worker, args=(
-                            name, 
-                            mem_particles[random_start:random_start + process_batch_size],
-                            mem_rotations[random_start:random_start + process_batch_size],
-                            opt.particles_mu,
-                            opt.particles_sigma,
-                            [opt.micrograph_size, opt.micrograph_size],
-                            opt.particle_collapse_ratio,
-                            random_start + batch_idx * batch_particles,  # offset for particle indexing
-                            mics_mrc_dir,          
-                            mics_png_dir,          
-                            mics_mask_dir,         
-                            particles_mask_dir,    
-                            mics_particle_info_dir,
-                            mask_threshold,
-                        ), 
-                        callback=lambda arg: pbar.update(1)
-                    )
-                pool.close()
-                pool.join()
-                
-                # Force garbage collection after each epoch
-                gc.collect()
-                
-            pbar.close()
-        else:
-            for name in tqdm(sync_mics_name, unit='image', 
-                             desc=f'Generating synthetic micrographs batch {batch_idx+1}/{num_batches}...'):
-                worker(
-                    name, 
-                    mem_particles,
-                    mem_rotations,
-                    opt.particles_mu,
-                    opt.particles_sigma,
-                    [opt.micrograph_size, opt.micrograph_size],
-                    opt.particle_collapse_ratio,
-                    batch_idx * batch_particles,  # offset for particle indexing
-                    mics_mrc_dir,          
-                    mics_png_dir,          
-                    mics_mask_dir,         
-                    particles_mask_dir,    
-                    mics_particle_info_dir,
-                    mask_threshold,
-                )
-        
-        # Explicitly cleanup memory-mapped arrays
-        del mem_particles
-        del mem_rotations
-        gc.collect()
-        
-    logger.info('All batches processed successfully!')
-    
-    # Combine all rotations and particles from memory-mapped files
-    logger.info('Combining particle data...')
-    
-    # Load each file to get shapes for pre-allocation
-    first_rot = np.load(rotation_files[0])
-    first_part = np.load(particle_files[0])
-    rot_shape = list(first_rot.shape)
-    part_shape = list(first_part.shape)
-    
-    # Calculate total sizes
-    total_particles = 0
-    for part_file in particle_files:
-        part_shape_i = np.load(part_file).shape
-        total_particles += part_shape_i[0]
-    
-    # Create memory-mapped output files instead of in-memory arrays
-    rot_shape[0] = total_particles
-    part_shape[0] = total_particles
-    
-    rot_combined_file = os.path.join(temp_dir, "combined_rotations.npy")
-    part_combined_file = os.path.join(temp_dir, "combined_particles.npy")
-    
-    # Create empty files of the right size
-    combined_rotations = np.lib.format.open_memmap(
-        rot_combined_file, mode='w+', 
-        dtype=first_rot.dtype, shape=tuple(rot_shape))
-    
-    combined_particles = np.lib.format.open_memmap(
-        part_combined_file, mode='w+', 
-        dtype=first_part.dtype, shape=tuple(part_shape))
-    
-    # Copy data from memory-mapped files in smaller chunks
-    start_idx = 0
-    for rot_file, part_file in zip(rotation_files, particle_files):
-        logger.info(f"Processing {rot_file} for combination")
-        
-        # Load with memory mapping
-        rot_data = np.load(rot_file, mmap_mode='r')
-        part_data = np.load(part_file, mmap_mode='r')
-        batch_size = rot_data.shape[0]
-        
-        # Process in smaller chunks to avoid memory issues
-        chunk_size = 1000  # Adjust based on your memory constraints
-        for chunk_start in range(0, batch_size, chunk_size):
-            chunk_end = min(chunk_start + chunk_size, batch_size)
-            chunk_slice = slice(chunk_start, chunk_end)
-            
-            # Copy the chunk to the combined array
-            dest_slice = slice(start_idx + chunk_start, start_idx + chunk_end)
-            combined_rotations[dest_slice] = rot_data[chunk_slice]
-            combined_particles[dest_slice] = part_data[chunk_slice]
-            
-            # Force flush to disk
-            combined_rotations.flush()
-            combined_particles.flush()
-        
-        start_idx += batch_size
-        
-        # Clean up
-        del rot_data
-        del part_data
-        gc.collect()
-    
-    # Ensure data is written to disk
-    combined_rotations.flush()
-    combined_particles.flush()
-    
-    # Save metadata
-    opt.resized_particles = tuple(combined_particles.shape)
-    opt.rotations = tuple(combined_rotations.shape)
-    opt.func = None
-    opt._parser = None
-    with open(osp.join(save_dir, 'opt.json'), 'w') as f:
-        json.dump(vars(opt), f, default=lambda x: str(x) if not isinstance(x, (int, float, str, list, dict, bool, type(None))) else x)
 
-    # Save rotations and resized_particles (copy from memory-mapped file)
-    logger.info(f"Saving final rotations and particles to {save_dir}")
-    np.save(osp.join(save_dir, 'rotations.npy'), combined_rotations)
-    np.save(osp.join(save_dir, 'particles.npy'), combined_particles)
-    
-    # Cleanup temporary directory
-    logger.info(f"Cleaning up temporary files in {temp_dir}")
-    del combined_rotations
-    del combined_particles
-    gc.collect()
-    shutil.rmtree(temp_dir)
+    try:
+        # Process data in batches
+        for batch_idx in range(num_batches):
+            logger.info(f"Processing batch {batch_idx+1}/{num_batches}")
+            
+            # Calculate start and end indices for this batch
+            start_mic = batch_idx * max_mics_per_batch
+            end_mic = min((batch_idx + 1) * max_mics_per_batch, n_micrographs)
+            batch_mics = end_mic - start_mic
+            
+            # Calculate number of particles needed for this batch
+            batch_particles = int(opt.particles_mu * batch_mics * 1.2)
+            
+            logger.info(f"Generating {batch_particles} particles for micrographs {start_mic} to {end_mic-1}")
+            
+            # Generate just this batch's particles
+            if mode == 'homo':
+                resized_particles, rotations = generate_particles_homo(
+                    opt.input_map,
+                    batch_particles,
+                    opt.particle_size,
+                    opt.device,
+                    symmetry=opt.symmetry
+                )
+            elif mode == 'hetero':
+                resized_particles, rotations, z_values = generate_particles_hetero(
+                    batch_particles,
+                    opt.particle_size,
+                    opt.device,
+                    opt.drgn_dir,
+                    opt.drgn_epoch,
+                    opt.same_rot
+                )
+            
+            # Create memory-mapped files for this batch
+            rot_file = os.path.join(temp_dir, f"rotations_batch_{batch_idx}.npy")
+            part_file = os.path.join(temp_dir, f"particles_batch_{batch_idx}.npy")
+            
+            # Save the arrays to disk
+            np.save(rot_file, rotations)
+            np.save(part_file, resized_particles)
+            
+            # Track the files
+            rotation_files.append(rot_file)
+            particle_files.append(part_file)
+            
+            # Now load with memory mapping for processing
+            mem_rotations = np.load(rot_file, mmap_mode='r')
+            mem_particles = np.load(part_file, mmap_mode='r')
+            
+            # Get micrograph names for this batch
+            sync_mics_name = [f'sync_mic_{i:04d}' for i in range(start_mic, end_mic)]
+            
+            if not opt.debug:
+                pbar = tqdm(total=len(sync_mics_name), unit='image', 
+                          desc=f'Generating synthetic micrographs batch {batch_idx+1}/{num_batches}...')
+                
+                # Process in smaller sub-batches for better memory management
+                process_batch_size = opt.batch_size
+                batch_epochs = len(sync_mics_name) // process_batch_size
+                if len(sync_mics_name) % process_batch_size != 0: 
+                    batch_epochs += 1
+                    
+                for epoch in range(batch_epochs):
+                    # Use a smaller number of threads to reduce memory pressure
+                    n_threads = min(opt.n_threads, 6)
+                    random_start = np.random.randint(0, mem_particles.shape[0] - process_batch_size + 1)
+                    epoch_start = epoch * process_batch_size
+                    epoch_end = min((epoch + 1) * process_batch_size, len(sync_mics_name))
+                    
+                    pool = Pool(n_threads)
+                    for name in sync_mics_name[epoch_start:epoch_end]:
+                        pool.apply_async(worker, args=(
+                                name, 
+                                mem_particles[random_start:random_start + process_batch_size],
+                                mem_rotations[random_start:random_start + process_batch_size],
+                                opt.particles_mu,
+                                opt.particles_sigma,
+                                [opt.micrograph_size, opt.micrograph_size],
+                                opt.particle_collapse_ratio,
+                                random_start + batch_idx * batch_particles,  # offset for particle indexing
+                                mics_mrc_dir,          
+                                mics_png_dir,          
+                                mics_mask_dir,         
+                                particles_mask_dir,    
+                                mics_particle_info_dir,
+                                mask_threshold,
+                            ), 
+                            callback=lambda arg: pbar.update(1)
+                        )
+                    pool.close()
+                    pool.join()
+                    
+                    # Force garbage collection after each epoch
+                    gc.collect()
+                    
+                pbar.close()
+            else:
+                for name in tqdm(sync_mics_name, unit='image', 
+                                 desc=f'Generating synthetic micrographs batch {batch_idx+1}/{num_batches}...'):
+                    worker(
+                        name, 
+                        mem_particles,
+                        mem_rotations,
+                        opt.particles_mu,
+                        opt.particles_sigma,
+                        [opt.micrograph_size, opt.micrograph_size],
+                        opt.particle_collapse_ratio,
+                        batch_idx * batch_particles,  # offset for particle indexing
+                        mics_mrc_dir,          
+                        mics_png_dir,          
+                        mics_mask_dir,         
+                        particles_mask_dir,    
+                        mics_particle_info_dir,
+                        mask_threshold,
+                    )
+            
+            # Explicitly cleanup memory-mapped arrays
+            del mem_particles
+            del mem_rotations
+            gc.collect()
+        
+        logger.info('All batches processed successfully!')
+        
+        # Combine all rotations and particles from memory-mapped files
+        logger.info('Combining particle data...')
+        
+        # Load each file to get shapes for pre-allocation
+        first_rot = np.load(rotation_files[0])
+        first_part = np.load(particle_files[0])
+        rot_shape = list(first_rot.shape)
+        part_shape = list(first_part.shape)
+        
+        # Calculate total sizes
+        total_particles = 0
+        for part_file in particle_files:
+            part_shape_i = np.load(part_file).shape
+            total_particles += part_shape_i[0]
+        
+        # Create memory-mapped output files instead of in-memory arrays
+        rot_shape[0] = total_particles
+        part_shape[0] = total_particles
+        
+        rot_combined_file = os.path.join(temp_dir, "combined_rotations.npy")
+        part_combined_file = os.path.join(temp_dir, "combined_particles.npy")
+        
+        # Create empty files of the right size
+        combined_rotations = np.lib.format.open_memmap(
+            rot_combined_file, mode='w+', 
+            dtype=first_rot.dtype, shape=tuple(rot_shape))
+        
+        combined_particles = np.lib.format.open_memmap(
+            part_combined_file, mode='w+', 
+            dtype=first_part.dtype, shape=tuple(part_shape))
+        
+        # Copy data from memory-mapped files in smaller chunks
+        start_idx = 0
+        for rot_file, part_file in zip(rotation_files, particle_files):
+            logger.info(f"Processing {rot_file} for combination")
+            
+            # Load with memory mapping
+            rot_data = np.load(rot_file, mmap_mode='r')
+            part_data = np.load(part_file, mmap_mode='r')
+            batch_size = rot_data.shape[0]
+            
+            # Process in smaller chunks to avoid memory issues
+            chunk_size = 1000  # Adjust based on your memory constraints
+            for chunk_start in range(0, batch_size, chunk_size):
+                chunk_end = min(chunk_start + chunk_size, batch_size)
+                chunk_slice = slice(chunk_start, chunk_end)
+                
+                # Copy the chunk to the combined array
+                dest_slice = slice(start_idx + chunk_start, start_idx + chunk_end)
+                combined_rotations[dest_slice] = rot_data[chunk_slice]
+                combined_particles[dest_slice] = part_data[chunk_slice]
+                
+                # Force flush to disk
+                combined_rotations.flush()
+                combined_particles.flush()
+            
+            start_idx += batch_size
+            
+            # Clean up
+            del rot_data
+            del part_data
+            gc.collect()
+        
+        # Ensure data is written to disk
+        combined_rotations.flush()
+        combined_particles.flush()
+        
+        # Save metadata
+        opt.resized_particles = tuple(combined_particles.shape)
+        opt.rotations = tuple(combined_rotations.shape)
+        opt.func = None
+        opt._parser = None
+        with open(osp.join(save_dir, 'opt.json'), 'w') as f:
+            json.dump(vars(opt), f, default=lambda x: str(x) if not isinstance(x, (int, float, str, list, dict, bool, type(None))) else x)
+
+        # Save rotations and resized_particles (copy from memory-mapped file)
+        logger.info(f"Saving final rotations and particles to {save_dir}")
+        np.save(osp.join(save_dir, 'rotations.npy'), combined_rotations)
+        np.save(osp.join(save_dir, 'particles.npy'), combined_particles)
+        
+        # Cleanup temporary directory
+        logger.info(f"Cleaning up temporary files in {temp_dir}")
+        del combined_rotations
+        del combined_particles
+        gc.collect()
+        shutil.rmtree(temp_dir)
+    except KeyboardInterrupt:
+        logger.warning("Process interrupted by user. Cleaning up temporary files.")
+        try:
+            shutil.rmtree(temp_dir)
+        except Exception as e:
+            logger.error(f"Failed to remove temporary directory {temp_dir}: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"An error occurred: {e}. Cleaning up temporary files.")
+        try:
+            shutil.rmtree(temp_dir)
+        except Exception as e2:
+            logger.error(f"Failed to remove temporary directory {temp_dir}: {e2}")
+        raise
+
+# ...existing code...
 
 def worker(name, 
            resized_particles,
