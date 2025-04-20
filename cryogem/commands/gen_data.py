@@ -81,16 +81,57 @@ def main(opt):
     # Process micrographs in smaller batches to save memory
     max_mics_per_batch = 2000  # Reduced from 1000 to avoid memory issues
     num_batches = (n_micrographs + max_mics_per_batch - 1) // max_mics_per_batch
-    
+
+    # Pre-calculate number of particles per batch for pre-allocation
+    batch_particles_list = []
+    for batch_idx in range(num_batches):
+        start_mic = batch_idx * max_mics_per_batch
+        end_mic = min((batch_idx + 1) * max_mics_per_batch, n_micrographs)
+        batch_mics = end_mic - start_mic
+        batch_particles = int(opt.particles_mu * batch_mics * 1.2)
+        batch_particles_list.append(batch_particles)
+    total_particles = sum(batch_particles_list)
+
     # Create temporary directory for memory-mapped files
     temp_dir = tempfile.mkdtemp(prefix="cryogem_")
     logger.info(f"Using temporary directory for memory-mapped files: {temp_dir}")
-    
-    # Arrays to track file paths for memory mapped arrays
-    rotation_files = []
-    particle_files = []
 
     try:
+        # Generate a dummy batch to get shapes/dtypes for pre-allocation
+        if mode == 'homo':
+            dummy_particles, dummy_rotations = generate_particles_homo(
+                opt.input_map,
+                1,
+                opt.particle_size,
+                opt.device,
+                symmetry=opt.symmetry
+            )
+        elif mode == 'hetero':
+            dummy_particles, dummy_rotations, _ = generate_particles_hetero(
+                1,
+                opt.particle_size,
+                opt.device,
+                opt.drgn_dir,
+                opt.drgn_epoch,
+                opt.same_rot
+            )
+        part_shape = list(dummy_particles.shape)
+        rot_shape = list(dummy_rotations.shape)
+        part_shape[0] = total_particles
+        rot_shape[0] = total_particles
+
+        # Pre-allocate combined memmap files
+        rot_combined_file = os.path.join(temp_dir, "combined_rotations.npy")
+        part_combined_file = os.path.join(temp_dir, "combined_particles.npy")
+        combined_rotations = np.lib.format.open_memmap(
+            rot_combined_file, mode='w+', 
+            dtype=dummy_rotations.dtype, shape=tuple(rot_shape))
+        combined_particles = np.lib.format.open_memmap(
+            part_combined_file, mode='w+', 
+            dtype=dummy_particles.dtype, shape=tuple(part_shape))
+
+        write_idx = 0  # Track where to write next
+
         # Process data in batches
         for batch_idx in range(num_batches):
             logger.info(f"Processing batch {batch_idx+1}/{num_batches}")
@@ -99,9 +140,7 @@ def main(opt):
             start_mic = batch_idx * max_mics_per_batch
             end_mic = min((batch_idx + 1) * max_mics_per_batch, n_micrographs)
             batch_mics = end_mic - start_mic
-            
-            # Calculate number of particles needed for this batch
-            batch_particles = int(opt.particles_mu * batch_mics * 1.2)
+            batch_particles = batch_particles_list[batch_idx]
             
             logger.info(f"Generating {batch_particles} particles for micrographs {start_mic} to {end_mic-1}")
             
@@ -132,10 +171,6 @@ def main(opt):
             np.save(rot_file, rotations)
             np.save(part_file, resized_particles)
             
-            # Track the files
-            rotation_files.append(rot_file)
-            particle_files.append(part_file)
-            
             # Now load with memory mapping for processing
             mem_rotations = np.load(rot_file, mmap_mode='r')
             mem_particles = np.load(part_file, mmap_mode='r')
@@ -154,7 +189,6 @@ def main(opt):
                     batch_epochs += 1
                     
                 for epoch in range(batch_epochs):
-                    # Use a smaller number of threads to reduce memory pressure
                     n_threads = min(opt.n_threads, 6)
                     random_start = np.random.randint(0, mem_particles.shape[0] - process_batch_size + 1)
                     epoch_start = epoch * process_batch_size
@@ -183,7 +217,6 @@ def main(opt):
                     pool.close()
                     pool.join()
                     
-                    # Force garbage collection after each epoch
                     gc.collect()
                     
                 pbar.close()
@@ -207,80 +240,23 @@ def main(opt):
                         mask_threshold,
                     )
             
-            # Explicitly cleanup memory-mapped arrays
+            # Write this batch's data into the combined memmap files
+            batch_size = mem_rotations.shape[0]
+            combined_rotations[write_idx:write_idx+batch_size] = mem_rotations
+            combined_particles[write_idx:write_idx+batch_size] = mem_particles
+            combined_rotations.flush()
+            combined_particles.flush()
+            write_idx += batch_size
+
+            # Explicitly cleanup memory-mapped arrays and delete temp files
             del mem_particles
             del mem_rotations
             gc.collect()
+            os.remove(rot_file)
+            os.remove(part_file)
         
-        logger.info('All batches processed successfully!')
-        
-        # Combine all rotations and particles from memory-mapped files
-        logger.info('Combining particle data...')
-        
-        # Load each file to get shapes for pre-allocation
-        first_rot = np.load(rotation_files[0])
-        first_part = np.load(particle_files[0])
-        rot_shape = list(first_rot.shape)
-        part_shape = list(first_part.shape)
-        
-        # Calculate total sizes
-        total_particles = 0
-        for part_file in particle_files:
-            part_shape_i = np.load(part_file).shape
-            total_particles += part_shape_i[0]
-        
-        # Create memory-mapped output files instead of in-memory arrays
-        rot_shape[0] = total_particles
-        part_shape[0] = total_particles
-        
-        rot_combined_file = os.path.join(temp_dir, "combined_rotations.npy")
-        part_combined_file = os.path.join(temp_dir, "combined_particles.npy")
-        
-        # Create empty files of the right size
-        combined_rotations = np.lib.format.open_memmap(
-            rot_combined_file, mode='w+', 
-            dtype=first_rot.dtype, shape=tuple(rot_shape))
-        
-        combined_particles = np.lib.format.open_memmap(
-            part_combined_file, mode='w+', 
-            dtype=first_part.dtype, shape=tuple(part_shape))
-        
-        # Copy data from memory-mapped files in smaller chunks
-        start_idx = 0
-        for rot_file, part_file in zip(rotation_files, particle_files):
-            logger.info(f"Processing {rot_file} for combination")
-            
-            # Load with memory mapping
-            rot_data = np.load(rot_file, mmap_mode='r')
-            part_data = np.load(part_file, mmap_mode='r')
-            batch_size = rot_data.shape[0]
-            
-            # Process in smaller chunks to avoid memory issues
-            chunk_size = 1000  # Adjust based on your memory constraints
-            for chunk_start in range(0, batch_size, chunk_size):
-                chunk_end = min(chunk_start + chunk_size, batch_size)
-                chunk_slice = slice(chunk_start, chunk_end)
-                
-                # Copy the chunk to the combined array
-                dest_slice = slice(start_idx + chunk_start, start_idx + chunk_end)
-                combined_rotations[dest_slice] = rot_data[chunk_slice]
-                combined_particles[dest_slice] = part_data[chunk_slice]
-                
-                # Force flush to disk
-                combined_rotations.flush()
-                combined_particles.flush()
-            
-            start_idx += batch_size
-            
-            # Clean up
-            del rot_data
-            del part_data
-            gc.collect()
-        
-        # Ensure data is written to disk
-        combined_rotations.flush()
-        combined_particles.flush()
-        
+        logger.info('All batches processed and combined successfully!')
+
         # Save metadata
         opt.resized_particles = tuple(combined_particles.shape)
         opt.rotations = tuple(combined_rotations.shape)
@@ -314,8 +290,6 @@ def main(opt):
         except Exception as e2:
             logger.error(f"Failed to remove temporary directory {temp_dir}: {e2}")
         raise
-
-# ...existing code...
 
 def worker(name, 
            resized_particles,
