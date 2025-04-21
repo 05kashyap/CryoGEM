@@ -26,6 +26,9 @@ def add_args(parser):
                       help="Batch size for training")
     parser.add_argument("--output_dir", type=str, default="save_images/ddpm_experiment", 
                       help="Base directory for output")
+    parser.add_argument("--continue_train", action="store_true", help="Resume training from checkpoint")
+    parser.add_argument("--epoch_count", type=int, default=None, help="Epoch to start counting from")
+    parser.add_argument("--resume_epoch", type=int, default=None, help="Epoch checkpoint to load (if resuming)")
     return parser
 
 def run_command(cmd, description):
@@ -76,7 +79,7 @@ def main(args):
         "--mask_threshold", "0.9",
         "--n_particles", str(max(1000, int(args.training_samples * 100 * 1.2))) # Ensure enough particles
     ]
-    run_command(cmd_gen_training, "Generate training data")
+    #run_command(cmd_gen_training, "Generate training data")
 
     logger.info("Step 2: Generating ice gradient weight maps...")
     ice_dir = f"save_images/esti_ice/{args.dataset}/"
@@ -90,7 +93,7 @@ def main(args):
         "--output_len", "1024",
         "--device", f"cuda:{args.gpu}"
     ]
-    run_command(cmd_esti_ice, "Generate ice gradient weight maps")
+    #run_command(cmd_esti_ice, "Generate ice gradient weight maps")
     
     # 3. Generate testing data with CryoGEM
     logger.info("Step 3: Generating testing data using CryoGEM...")
@@ -107,7 +110,7 @@ def main(args):
         "--particle_size", "90",
         "--mask_threshold", "0.9"
     ]
-    run_command(cmd_gen_testing, "Generate testing data")
+    #run_command(cmd_gen_testing, "Generate testing data")
     
         # 4. Train DDPM model on generated data
     logger.info("Step 4: Training DDPM model on generated data...")
@@ -135,6 +138,14 @@ def main(args):
         "--lr_policy", "linear",
         "--save_epoch_freq", "10",  # Save checkpoints every 10 epochs
     ]
+    # Add resume arguments if requested
+    if args.continue_train:
+        cmd_train_ddpm.append("--continue_train")
+        if args.epoch_count is not None:
+            cmd_train_ddpm += ["--epoch_count", str(args.epoch_count)]
+        if args.resume_epoch is not None:
+            cmd_train_ddpm += ["--epoch", str(args.resume_epoch)]
+            
     run_command(cmd_train_ddpm, "Train DDPM model")
     
     # 5. Generate samples with trained DDPM model
