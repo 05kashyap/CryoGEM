@@ -234,7 +234,10 @@ def main(args):
                 loss_log_path = os.path.join(opt.save_dir, 'loss_log.txt')
                 with open(loss_log_path, "a") as log_file:
                     log_file.write(f"(epoch: {epoch}) {fid_line}\n")
-
+                # Write a separate FID log for this epoch
+                fid_epoch_log = os.path.join(opt.save_dir, f'fid_epoch_{epoch}.txt')
+                with open(fid_epoch_log, "w") as epoch_log:
+                    epoch_log.write(f"(epoch: {epoch}) {fid_line}\n")
         # Update learning rate
         model.update_learning_rate()
 
