@@ -216,7 +216,7 @@ def main(args):
                 "--num_samples", str(opt.fid_num_samples),
                 "--batch_size", str(opt.fid_batch_size),
                 "--image_size", str(opt.fid_image_size),
-                "--device", opt.gpu_ids if hasattr(opt, "gpu_ids") else "cuda:0",
+                "--device", str(opt.gpu_ids[0]) if hasattr(opt, "gpu_ids") and isinstance(opt.gpu_ids, (list, tuple)) else str(opt.gpu_ids) if hasattr(opt, "gpu_ids") else "cuda:0",
                 "--timesteps", str(opt.timesteps)
             ]
             # logger.info(f"Running FID command: {' '.join(fid_cmd)}")
