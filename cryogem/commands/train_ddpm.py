@@ -6,6 +6,7 @@ import torch
 from tqdm import tqdm
 import numpy as np
 import gc
+import subprocess
 
 from cryogem.options import process_opt, base_add_args
 from cryogem.datasets import create_dataset
@@ -51,7 +52,10 @@ def extra_add_args(parser):
     parser.add_argument("--display_port", type=int, default=8097, help="port of the web display")
     parser.add_argument("--display_ncols", type=int, default=4, help="number of images per row in the web display")
     parser.add_argument("--max_repetitions", type=int, default=5, help="maximum number of repetitions for repetitive training")
-    
+    parser.add_argument("--fid_eval_freq", type=int, default=10, help="Frequency (in epochs) to evaluate FID. 0 disables FID eval.")
+    parser.add_argument("--fid_num_samples", type=int, default=500, help="Number of samples for FID evaluation.")
+    parser.add_argument("--fid_batch_size", type=int, default=16, help="Batch size for FID evaluation.")
+    parser.add_argument("--fid_image_size", type=int, default=128, help="Image size for FID evaluation.")
     # Override default values from base_add_args
     parser.set_defaults(batch_size=8)  
 
@@ -290,6 +294,40 @@ def main(args):
             logger.info(f"Saving the model at the end of epoch {epoch}")
             model.save_networks(epoch)
             
+        if opt.fid_eval_freq > 0 and epoch % opt.fid_eval_freq == 0 and epoch != 0:
+            logger.info(f"Running FID evaluation at epoch {epoch}")
+            fid_generated_dir = os.path.join(opt.save_dir, f"fid_generated_epoch_{epoch}")
+            os.makedirs(fid_generated_dir, exist_ok=True)
+            checkpoint_path = os.path.join(opt.checkpoints_dir, opt.name, f"{epoch}_net_Diffusion.pth")
+            real_images_dir = opt.real_dir.replace("mics_mrc", "mics_png")  # Adjust as needed
+
+            fid_cmd = [
+                "python", "-m", "cryogem.commands.eval_fid",
+                "--model_path", checkpoint_path,
+                "--real_images_dir", real_images_dir,
+                "--generated_images_dir", fid_generated_dir,
+                "--num_samples", str(opt.fid_num_samples),
+                "--batch_size", str(opt.fid_batch_size),
+                "--image_size", str(opt.fid_image_size),
+                "--device", opt.gpu_ids if hasattr(opt, "gpu_ids") else "cuda:0",
+                "--timesteps", str(opt.timesteps)
+            ]
+            logger.info(f"Running FID command: {' '.join(fid_cmd)}")
+            result = subprocess.run(fid_cmd, capture_output=True, text=True)
+            logger.info(f"FID evaluation output:\n{result.stdout}")
+            if result.returncode != 0:
+                logger.error(f"FID evaluation failed:\n{result.stderr}")
+
+            # --- Append FID to loss_log.txt ---
+            fid_txt_path = os.path.join(fid_generated_dir, "fid_results.txt")
+            if os.path.exists(fid_txt_path):
+                with open(fid_txt_path, "r") as f:
+                    fid_line = f.readline().strip()
+                # Append to loss_log.txt
+                loss_log_path = os.path.join(opt.checkpoints_dir, opt.name, 'loss_log.txt')
+                with open(loss_log_path, "a") as log_file:
+                    log_file.write(f"(epoch: {epoch}) {fid_line}\n")
+
         # Update learning rate
         model.update_learning_rate()
 
