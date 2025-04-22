@@ -43,7 +43,7 @@ def compute_statistics_of_path(path, model, batch_size, device):
         transforms.Compose([
             transforms.Resize((299, 299)),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+            # transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
         ])
     )
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=4)
