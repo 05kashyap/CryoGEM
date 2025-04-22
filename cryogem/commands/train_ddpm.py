@@ -231,7 +231,7 @@ def main(args):
                 with open(fid_txt_path, "r") as f:
                     fid_line = f.readline().strip()
                 # Append to loss_log.txt
-                loss_log_path = os.path.join(opt.checkpoints_dir, opt.name, 'loss_log.txt')
+                loss_log_path = os.path.join(opt.save_dir, 'loss_log.txt')
                 with open(loss_log_path, "a") as log_file:
                     log_file.write(f"(epoch: {epoch}) {fid_line}\n")
 
