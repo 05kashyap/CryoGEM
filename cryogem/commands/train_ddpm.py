@@ -201,43 +201,43 @@ def main(args):
             logger.info(f"Saving the model at the end of epoch {epoch}")
             model.save_networks(epoch)
             
-        if opt.fid_eval_freq > 0 and epoch % opt.fid_eval_freq == 0 and epoch != 0:
-            logger.info(f"Running FID evaluation at epoch {epoch}")
-            fid_generated_dir = os.path.join(opt.save_dir, f"fid_generated_epoch_{epoch}")
-            os.makedirs(fid_generated_dir, exist_ok=True)
-            checkpoint_path = os.path.join(opt.checkpoints_dir, opt.name, f"{epoch}_net_Diffusion.pth")
-            real_images_dir = opt.real_dir.replace("mics_mrc", "mics_png")  # Adjust as needed
+        # if opt.fid_eval_freq > 0 and epoch % opt.fid_eval_freq == 0 and epoch != 0:
+        #     logger.info(f"Running FID evaluation at epoch {epoch}")
+        #     fid_generated_dir = os.path.join(opt.save_dir, f"fid_generated_epoch_{epoch}")
+        #     os.makedirs(fid_generated_dir, exist_ok=True)
+        #     checkpoint_path = os.path.join(opt.checkpoints_dir, opt.name, f"{epoch}_net_Diffusion.pth")
+        #     real_images_dir = opt.real_dir.replace("mics_mrc", "mics_png")  # Adjust as needed
 
-            fid_cmd = [
-                "python", "-m", "cryogem.commands.eval_fid",
-                "--model_path", checkpoint_path,
-                "--real_images_dir", real_images_dir,
-                "--generated_images_dir", fid_generated_dir,
-                "--num_samples", str(opt.fid_num_samples),
-                "--batch_size", str(opt.fid_batch_size),
-                "--image_size", str(opt.fid_image_size),
-                "--device", str(opt.gpu_ids[0]) if hasattr(opt, "gpu_ids") and isinstance(opt.gpu_ids, (list, tuple)) else str(opt.gpu_ids) if hasattr(opt, "gpu_ids") else "cuda:0",
-                "--timesteps", str(opt.timesteps)
-            ]
-            # logger.info(f"Running FID command: {' '.join(fid_cmd)}")
-            result = subprocess.run(fid_cmd, capture_output=True, text=True)
-            logger.info(f"FID evaluation output:\n{result.stdout}")
-            if result.returncode != 0:
-                logger.error(f"FID evaluation failed:\n{result.stderr}")
+        #     fid_cmd = [
+        #         "python", "-m", "cryogem.commands.eval_fid",
+        #         "--model_path", checkpoint_path,
+        #         "--real_images_dir", real_images_dir,
+        #         "--generated_images_dir", fid_generated_dir,
+        #         "--num_samples", str(opt.fid_num_samples),
+        #         "--batch_size", str(opt.fid_batch_size),
+        #         "--image_size", str(opt.fid_image_size),
+        #         "--device", str(opt.gpu_ids[0]) if hasattr(opt, "gpu_ids") and isinstance(opt.gpu_ids, (list, tuple)) else str(opt.gpu_ids) if hasattr(opt, "gpu_ids") else "cuda:0",
+        #         "--timesteps", str(opt.timesteps)
+        #     ]
+            # # logger.info(f"Running FID command: {' '.join(fid_cmd)}")
+            # result = subprocess.run(fid_cmd, capture_output=True, text=True)
+            # logger.info(f"FID evaluation output:\n{result.stdout}")
+            # if result.returncode != 0:
+            #     logger.error(f"FID evaluation failed:\n{result.stderr}")
 
-            # --- Append FID to loss_log.txt ---
-            fid_txt_path = os.path.join(fid_generated_dir, "fid_results.txt")
-            if os.path.exists(fid_txt_path):
-                with open(fid_txt_path, "r") as f:
-                    fid_line = f.readline().strip()
-                # Append to loss_log.txt
-                loss_log_path = os.path.join(opt.save_dir, 'loss_log.txt')
-                with open(loss_log_path, "a") as log_file:
-                    log_file.write(f"(epoch: {epoch}) {fid_line}\n")
-                # Write a separate FID log for this epoch
-                fid_epoch_log = os.path.join(opt.save_dir, f'fid_epoch_{epoch}.txt')
-                with open(fid_epoch_log, "w") as epoch_log:
-                    epoch_log.write(f"(epoch: {epoch}) {fid_line}\n")
+            # # --- Append FID to loss_log.txt ---
+            # fid_txt_path = os.path.join(fid_generated_dir, "fid_results.txt")
+            # if os.path.exists(fid_txt_path):
+            #     with open(fid_txt_path, "r") as f:
+            #         fid_line = f.readline().strip()
+            #     # Append to loss_log.txt
+            #     loss_log_path = os.path.join(opt.save_dir, 'loss_log.txt')
+            #     with open(loss_log_path, "a") as log_file:
+            #         log_file.write(f"(epoch: {epoch}) {fid_line}\n")
+            #     # Write a separate FID log for this epoch
+            #     fid_epoch_log = os.path.join(opt.save_dir, f'fid_epoch_{epoch}.txt')
+            #     with open(fid_epoch_log, "w") as epoch_log:
+            #         epoch_log.write(f"(epoch: {epoch}) {fid_line}\n")
         # Update learning rate
         model.update_learning_rate()
 
