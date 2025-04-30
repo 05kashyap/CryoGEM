@@ -4,6 +4,8 @@ from collections import OrderedDict
 from abc import ABC, abstractmethod
 from cryogem.models import networks
 import logging
+import numpy as np
+import random
 
 logger = logging.getLogger(__name__)
 
@@ -165,27 +167,39 @@ class BaseModel(ABC):
         return errors_ret
 
     def save_networks(self, epoch):
-        """Save all the networks to the disk.
-
-        Parameters:
-            epoch (int) -- current epoch; used in the file name '%s_net_%s.pth' % (epoch, name)
-        """
         for name in self.model_names:
             if isinstance(name, str):
                 save_filename = '%s_net_%s.pth' % (epoch, name)
                 save_path = os.path.join(self.save_dir, save_filename)
                 net = getattr(self, 'net' + name)
-
                 if len(self.gpu_ids) > 0 and torch.cuda.is_available():
-                    # Check if the network is wrapped in DataParallel
                     if isinstance(net, torch.nn.DataParallel):
                         torch.save(net.module.cpu().state_dict(), save_path)
                     else:
-                        # Save directly if not using DataParallel
                         torch.save(net.cpu().state_dict(), save_path)
                     net.cuda(self.gpu_ids[0])
                 else:
                     torch.save(net.cpu().state_dict(), save_path)
+        # Save optimizers
+        for i, optimizer in enumerate(self.optimizers):
+            save_filename = '%s_optimizer_%d.pth' % (epoch, i)
+            save_path = os.path.join(self.save_dir, save_filename)
+            torch.save(optimizer.state_dict(), save_path)
+        # Save schedulers
+        if hasattr(self, 'schedulers'):
+            for i, scheduler in enumerate(self.schedulers):
+                save_filename = '%s_scheduler_%d.pth' % (epoch, i)
+                save_path = os.path.join(self.save_dir, save_filename)
+                torch.save(scheduler.state_dict(), save_path)
+        # Save random state
+        rand_state = {
+            'torch': torch.get_rng_state(),
+            'cuda': torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+            'numpy': np.random.get_state(),
+            'python': random.getstate(),
+        }
+        save_path = os.path.join(self.save_dir, f'{epoch}_random_state.pth')
+        torch.save(rand_state, save_path)
 
     def __patch_instance_norm_state_dict(self, state_dict, module, keys, i=0):
         """Fix InstanceNorm checkpoints incompatibility (prior to 0.4)"""
@@ -202,15 +216,10 @@ class BaseModel(ABC):
             self.__patch_instance_norm_state_dict(state_dict, getattr(module, key), keys, i + 1)
 
     def load_networks(self, epoch, cpkt_path = "", hardcode=False):
-        """Load all the networks from the disk.
-
-        Parameters:
-            epoch (int) -- current epoch; used in the file name '%s_net_%s.pth' % (epoch, name)
-        """
         for name in self.model_names:
             if isinstance(name, str):
                 load_filename = '%s_net_%s.pth' % (epoch, name)
-                if '_sameR' in self.save_dir: #! WARNING:May error in future!
+                if '_sameR' in self.save_dir:
                     load_path = os.path.join(self.save_dir.replace('_sameR', ''), load_filename)
                 else:
                     load_path = os.path.join(self.save_dir, load_filename)
@@ -218,21 +227,37 @@ class BaseModel(ABC):
                 if isinstance(net, torch.nn.DataParallel):
                     net = net.module
                 logger.info('loading the model from %s' % load_path)
-                        
-                # if you are using PyTorch newer than 0.4 (e.g., built from
-                # GitHub source), you can remove str() on self.device
                 if hardcode:
-                    # Load the model with a hardcoded device (e.g., 'cuda:0')
                     state_dict = torch.load(cpkt_path, map_location=self.device)
                 else:
                     state_dict = torch.load(load_path, map_location=str(self.device))
                 if hasattr(state_dict, '_metadata'):
                     del state_dict._metadata
-
-                # patch InstanceNorm checkpoints prior to 0.4
-                for key in list(state_dict.keys()):  # need to copy keys here because we mutate in loop
+                for key in list(state_dict.keys()):
                     self.__patch_instance_norm_state_dict(state_dict, net, key.split('.'))
                 net.load_state_dict(state_dict)
+        # Load optimizers
+        for i, optimizer in enumerate(self.optimizers):
+            load_filename = '%s_optimizer_%d.pth' % (epoch, i)
+            load_path = os.path.join(self.save_dir, load_filename)
+            if os.path.exists(load_path):
+                optimizer.load_state_dict(torch.load(load_path, map_location=str(self.device)))
+        # Load schedulers
+        if hasattr(self, 'schedulers'):
+            for i, scheduler in enumerate(self.schedulers):
+                load_filename = '%s_scheduler_%d.pth' % (epoch, i)
+                load_path = os.path.join(self.save_dir, load_filename)
+                if os.path.exists(load_path):
+                    scheduler.load_state_dict(torch.load(load_path, map_location=str(self.device)))
+        # Load random state
+        rand_state_path = os.path.join(self.save_dir, f'{epoch}_random_state.pth')
+        if os.path.exists(rand_state_path):
+            rand_state = torch.load(rand_state_path, map_location='cpu')
+            torch.set_rng_state(rand_state['torch'])
+            if torch.cuda.is_available() and rand_state['cuda'] is not None:
+                torch.cuda.set_rng_state_all(rand_state['cuda'])
+            np.random.set_state(rand_state['numpy'])
+            random.setstate(rand_state['python'])
 
     def print_networks(self, verbose):
         """Print the total number of parameters in the network and (if verbose) network architecture
